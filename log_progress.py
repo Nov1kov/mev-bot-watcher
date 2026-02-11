@@ -52,5 +52,5 @@ def setup_logging():
     handler = logging.StreamHandler()
     handler.setFormatter(ColorFormatter())
 
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(logging.INFO)
     logger.addHandler(handler)

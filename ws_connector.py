@@ -3,7 +3,7 @@ import logging
 from collections import deque
 from typing import Dict, Callable, Literal
 
-import websockets
+import websockets.client
 
 
 SubscriptionType = Literal[
@@ -11,14 +11,15 @@ SubscriptionType = Literal[
     "logs",
     "newPendingTransactions",
     "syncing",
+    "newBlockHeaders",
 ]
 
 
 class WsConnectorRaw:
     OPEN_TIMEOUT = 20  # timeout for longest task such as load arbs.
 
-    def __init__(self, network_config):
-        self.node_url_ws = network_config['node_url_ws']
+    def __init__(self, node_url_ws: str):
+        self.node_url_ws = node_url_ws
         self.subscriptions: Dict[str, Callable] = {}
         self.subscription_setups = []
 
