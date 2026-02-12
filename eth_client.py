@@ -50,6 +50,23 @@ class EthClient:
         transaction = await self.eth_call('eth_getTransactionByHash', [tx_hash])
         return transaction
     
+    async def get_logs(self, from_block: int, to_block: int, address: str, topics: list) -> list:
+        """Получение логов по фильтру"""
+        params = {
+            'fromBlock': hex(from_block),
+            'toBlock': hex(to_block),
+            'address': address,
+            'topics': topics,
+        }
+        return await self.eth_call('eth_getLogs', [params])
+
+    async def get_eth_price_usd(self) -> float:
+        """Получение текущей цены ETH в USD через CoinGecko"""
+        url = "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd"
+        async with self.session.get(url) as response:
+            data = await response.json()
+            return data['ethereum']['usd']
+
     async def eth_getBlockReceipts(self, block_number: int | str) -> Dict:
         """Функция для получения receipt о блоке"""
         receipts = await self.eth_call('eth_getBlockReceipts', [hex(block_number) if isinstance(block_number, int) else block_number])

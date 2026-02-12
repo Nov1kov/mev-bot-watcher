@@ -1,4 +1,4 @@
-# MEV Calculator
+# MEV bot watcher
 
 CLI-утилита для анализа прибыльности MEV-ботов на Ethereum и EVM-совместимых сетях.
 

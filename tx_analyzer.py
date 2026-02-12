@@ -92,15 +92,42 @@ class TxAnalyzer:
         }
         return block_summary
 
+    async def get_relevant_blocks(self, start_block: int, end_block: int, chunk_size: int = 10000) -> set:
+        """Поиск блоков с WETH-трансферами watched_address через eth_getLogs"""
+        padded_address = "0x" + self.watched_address[2:].zfill(64)
+        block_numbers = set()
+
+        for from_block in range(start_block, end_block + 1, chunk_size):
+            to_block = min(from_block + chunk_size - 1, end_block)
+
+            logs_from = await self.eth_client.get_logs(
+                from_block, to_block,
+                self.weth_contract_address,
+                [self.ERC20_TRANSFER_TOPIC, padded_address],
+            )
+            logs_to = await self.eth_client.get_logs(
+                from_block, to_block,
+                self.weth_contract_address,
+                [self.ERC20_TRANSFER_TOPIC, None, padded_address],
+            )
+
+            for log in logs_from + logs_to:
+                block_numbers.add(int(log['blockNumber'], 16))
+
+        return block_numbers
+
     async def analyze_from_block(self, start_block_number: int):
         """Функция для анализа блоков начиная с указанного"""
         latest_block = await self.eth_client.get_latest_block()
 
         logging.info(
-            f"Monitoring from block: {start_block_number} to {latest_block} ({latest_block - start_block_number} blocks left)")
+            f"Scanning events from block {start_block_number} to {latest_block} ({latest_block - start_block_number} blocks)")
+
+        relevant_blocks = await self.get_relevant_blocks(start_block_number, latest_block)
+        logging.info(f"Found {len(relevant_blocks)} blocks with WETH transfers")
 
         summary_profit = 0
-        for block_number in print_progress(range(start_block_number, latest_block + 1)):
+        for block_number in print_progress(sorted(relevant_blocks), total_tasks=len(relevant_blocks)):
             block = await self.eth_client.get_block_with_transactions(block_number)
             block_summary = await self.analyze_block(block)
 
@@ -116,4 +143,7 @@ class TxAnalyzer:
                 logging_color('-' * 50)
                 summary_profit += block_summary['net_wei_change']
 
-        logging.info(f"Total profit: {self.prettify_weth(summary_profit)} WETH")
+        eth_price = await self.eth_client.get_eth_price_usd()
+        profit_eth = summary_profit / 1e18
+        profit_usd = profit_eth * eth_price
+        logging.info(f"Total profit: {self.prettify_weth(summary_profit)} WETH (${profit_usd:.2f} @ ETH=${eth_price:.0f})")
