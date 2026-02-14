@@ -95,28 +95,54 @@ def monitor(config: str, bot_name: Optional[str] = None):
 
     logging.info(f"Starting monitoring for {len(bots_to_monitor)} bots")
 
-    # Здесь будет реализация мониторинга для всех ботов
-    async def run_monitoring():
-        tasks = []
+    telegram_config = full_config.get('telegram')
 
-        for name, bot_config in bots_to_monitor.items():
-            weth_contract = bot_config['token_contract_address'].lower()
-            watched_address = bot_config['watched_address'].lower()
-            ws_rpc_url = bot_config.get('ws_rpc_url')
-            http_rpc_url = bot_config.get('http_rpc_url')
+    async def run_monitoring():
+        # Настройка Telegram уведомлений
+        notifier = None
+        if telegram_config and telegram_config.get('bot_token'):
+            from telegram_notifier import TelegramNotifier
+            notifier = TelegramNotifier(
+                bot_token=telegram_config['bot_token'],
+                chat_id=str(telegram_config['chat_id']),
+                notify_interval_minutes=telegram_config.get('notify_interval_minutes', 60),
+            )
+            logging.info(f"Telegram notifications enabled (interval: {telegram_config.get('notify_interval_minutes', 60)} min)")
+
+        tasks = []
+        eth_clients = []
+
+        for name, bot_cfg in bots_to_monitor.items():
+            weth_contract = bot_cfg['token_contract_address'].lower()
+            watched_address = bot_cfg['watched_address'].lower()
+            ws_rpc_url = bot_cfg.get('ws_rpc_url')
+            http_rpc_url = bot_cfg.get('http_rpc_url')
 
             logging.info(f"Setting up monitoring for bot '{name}':")
             logging.info(f"Token contract: {weth_contract}")
             logging.info(f"Watched address: {watched_address}")
 
-            async with WsConnectorRaw(ws_rpc_url) as ws:
-                async with EthClient(http_rpc_url) as eth_client:
-                    blocks_watcher = TxWatcher(eth_client, weth_contract, watched_address)
-                    await blocks_watcher.subscribe(ws)
-                    tasks.append(ws.run())
+            ws = WsConnectorRaw(ws_rpc_url)
+            eth_client = EthClient(http_rpc_url)
+            await eth_client.__aenter__()
+            eth_clients.append(eth_client)
 
-        # Запускаем все задачи параллельно
-        await asyncio.gather(*tasks)
+            watcher = TxWatcher(eth_client, weth_contract, watched_address,
+                                bot_name=name, notifier=notifier)
+            await watcher.subscribe(ws)
+            tasks.append(ws.run())
+
+        if notifier:
+            await notifier.send_startup_message(bots_to_monitor)
+            tasks.append(notifier.run_periodic_flush())
+
+        try:
+            await asyncio.gather(*tasks)
+        finally:
+            if notifier:
+                await notifier.force_flush()
+            for client in eth_clients:
+                await client.__aexit__(None, None, None)
 
     asyncio.run(run_monitoring())
 

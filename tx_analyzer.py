@@ -3,7 +3,17 @@ from typing import Dict, Optional, Union, List
 
 from log_progress import print_progress
 from eth_client import EthClient
-from tx_watcher import parse_transfer_event, ERC20_TRANSFER_TOPIC
+
+ERC20_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+
+
+def parse_transfer_event(topics: List[str], data: str) -> tuple:
+    """Разбор ERC20 Transfer события из логов"""
+    # Transfer(address,address,uint256)
+    from_address = "0x" + topics[1][-40:].lower()
+    to_address = "0x" + topics[2][-40:].lower()
+    amount = int(data, 16)
+    return from_address, to_address, amount
 
 
 class TxAnalyzer:
@@ -88,7 +98,10 @@ class TxAnalyzer:
             "outgoing_weth": f"{outgoing_summary_weth} ({outgoing_details_weth})",
             "gas_fee_eth": f"{gas_fee_summary_eth} ({gas_fee_details_eth})",
             "net_weth_change": net_weth_change + net_weth_details,
-            "net_wei_change": net_wei_change
+            "net_wei_change": net_wei_change,
+            "tx_count": len(transactions_details),
+            "fail_count": sum(1 for tx in transactions_details if tx['status'] == 0),
+            "total_gas_wei": sum(tx['gas_fee_wei'] for tx in transactions_details),
         }
         return block_summary
 

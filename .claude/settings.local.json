@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(python -m pytest tests/test_telegram_notifier.py -v)",
+      "Bash(python -m unittest:*)"
     ]
   }
 }
