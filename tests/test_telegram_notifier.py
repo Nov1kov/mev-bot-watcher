@@ -191,7 +191,7 @@ class TestTelegramNotifierBatching(unittest.TestCase):
         self.assertIn("Ethereum", msg)
         self.assertIn("Arbitrum", msg)
         self.assertIn("30 мин", msg)
-        self.assertIn("0xc0c9...0191", msg)
+        self.assertIn("0xc0c9c680a96cf92604a94cff927c0ad674450191", msg)
 
 
 class TestTxEvent(unittest.TestCase):

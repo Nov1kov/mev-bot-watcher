@@ -1,0 +1,20 @@
+# Telegram уведомления (опционально)
+# telegram:
+#   bot_token: 'YOUR_BOT_TOKEN'
+#   chat_id: 'YOUR_CHAT_ID'
+#   notify_interval_minutes: 60  # не чаще чем раз в N минут
+
+bots:
+  ethereum:
+    blockchain: ethereum
+    token_contract_address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
+    watched_address: '0xYOUR_BOT_ADDRESS'
+    http_rpc_url: 'https://your-rpc-provider.com/api-key'
+    ws_rpc_url: 'wss://your-rpc-provider.com/api-key'
+
+  arbitrum:
+    blockchain: arbitrum
+    token_contract_address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'
+    watched_address: '0xYOUR_BOT_ADDRESS'
+    http_rpc_url: 'https://your-rpc-provider.com/api-key'
+    ws_rpc_url: 'ws://your-node-ip:8550'

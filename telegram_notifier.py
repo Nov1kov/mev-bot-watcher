@@ -76,9 +76,8 @@ class TelegramNotifier:
         for name, cfg in bots.items():
             chain = cfg.get('blockchain', 'unknown').capitalize()
             addr = cfg.get('watched_address', '')
-            short_addr = f"`{addr[:6]}...{addr[-4:]}`" if len(addr) > 10 else f"`{addr}`"
             lines.append(f"\u2022 *{name}* \u2014 {chain}")
-            lines.append(f"  {short_addr}")
+            lines.append(f"  `{addr}`")
         lines.append("")
         lines.append(f"\u23f0 Уведомления: раз в {interval} мин")
         await self._send("\n".join(lines))
