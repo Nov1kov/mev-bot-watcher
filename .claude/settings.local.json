@@ -3,7 +3,9 @@
     "allow": [
       "Bash(curl:*)",
       "Bash(python -m pytest tests/test_telegram_notifier.py -v)",
-      "Bash(python -m unittest:*)"
+      "Bash(python -m unittest:*)",
+      "Bash(python -m json.tool:*)",
+      "Bash(python:*)"
     ]
   }
 }

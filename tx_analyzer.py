@@ -25,40 +25,38 @@ class TxAnalyzer:
         self.watched_address = watched_address.lower()
         self.ERC20_TRANSFER_TOPIC = ERC20_TRANSFER_TOPIC
 
+    def parse_receipt(self, receipt: Dict, tx_hash: str) -> Dict:
+        """Разбор receipt транзакции: gas, статус, входящие/исходящие трансферы"""
+        incoming_wei = []
+        outgoing_wei = []
+        gas_fee_wei = int(receipt['gasUsed'], 16) * int(receipt['effectiveGasPrice'], 16)
+        status = int(receipt['status'], 16)
+
+        for log in receipt['logs']:
+            if (log['topics'][0].lower() == self.ERC20_TRANSFER_TOPIC
+                    and log['address'].lower() == self.weth_contract_address):
+                from_address, to_address, amount = parse_transfer_event(log['topics'], log['data'])
+                if from_address.lower() == self.watched_address:
+                    outgoing_wei.append(amount)
+                if to_address.lower() == self.watched_address:
+                    incoming_wei.append(amount)
+
+        return {
+            "status": status,
+            "tx_hash": tx_hash,
+            "incoming_wei": incoming_wei,
+            "outgoing_wei": outgoing_wei,
+            "gas_fee_wei": gas_fee_wei,
+        }
+
     async def analyze_block(self, block: Dict) -> Optional[Dict]:
         """Функция анализа транзакций внутри блока"""
         transactions_details = []
 
         for tx in block['transactions']:
             if tx['from'].lower() == self.watched_address or (tx['to'] and tx['to'].lower() == self.watched_address):
-
-                # Получаем квитанцию о транзакции для данных о логах
                 receipt = await self.eth_client.get_transaction_receipt(tx['hash'])
-                incoming_wei = []
-                outgoing_wei = []
-                gas_fee_wei = int(receipt['gasUsed'], 16) * int(receipt['effectiveGasPrice'], 16)
-                status = int(receipt['status'], 16)
-
-                # Анализируем логи на предмет Transfer событий
-                for log in receipt['logs']:
-                    if log['topics'][0].lower() == self.ERC20_TRANSFER_TOPIC and log[
-                        'address'].lower() == self.weth_contract_address:
-                        from_address, to_address, amount = parse_transfer_event(log['topics'], log['data'])
-                        if from_address.lower() == self.watched_address:
-                            outgoing_wei.append(amount)
-                        if to_address.lower() == self.watched_address:
-                            incoming_wei.append(amount)
-
-                # Собираем детальную информацию по транзакции
-                transactions_details.append(
-                    {
-                        "status": status,
-                        "tx_hash": tx['hash'],
-                        "incoming_wei": incoming_wei,
-                        "outgoing_wei": outgoing_wei,
-                        "gas_fee_wei": gas_fee_wei,
-                    }
-                )
+                transactions_details.append(self.parse_receipt(receipt, tx['hash']))
 
         if transactions_details:
             return self.create_block_summary(block, transactions_details)

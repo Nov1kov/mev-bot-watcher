@@ -66,7 +66,10 @@ class WsConnectorRaw:
                     message_params = response["params"]
                     subscription_id = message_params['subscription']
                     handler = self.subscriptions[subscription_id]
-                    await handler(message_params)
+                    try:
+                        await handler(message_params)
+                    except Exception as e:
+                        logging.exception(f"Subscription {subscription_id} handler error: {e}")
             except websockets.ConnectionClosed:
                 logging.exception(f"Web socket reconnection...")
                 continue
