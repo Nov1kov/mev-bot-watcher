@@ -40,22 +40,27 @@ bots:
 
 ### Docker
 
+Monitor all bots:
 ```bash
-docker run -v ./config.yaml:/app/config.yaml nov1kov/mev-watcher \
-  python main.py monitor -c /app/config.yaml -b ethereum
+docker run -d -v ./config.yaml:/app/config.yaml nov1kov/mev-watcher
 ```
 
+Monitor a specific bot:
 ```bash
-docker run -v ./config.yaml:/app/config.yaml nov1kov/mev-watcher \
-  python main.py analyze -c /app/config.yaml -b ethereum -s 18000000
+docker run -d -v ./config.yaml:/app/config.yaml nov1kov/mev-watcher monitor -b ethereum
+```
+
+Analyze blocks:
+```bash
+docker run -v ./config.yaml:/app/config.yaml nov1kov/mev-watcher analyze -b ethereum -s 18000000
 ```
 
 ### Local
 
 ```bash
 pip install -r requirements.txt
-python main.py monitor -c config.yaml -b ethereum
-python main.py analyze -c config.yaml -b ethereum -s 18000000
+python main.py monitor
+python main.py analyze -b ethereum -s 18000000
 ```
 
 ## Tests

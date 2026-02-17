@@ -111,6 +111,7 @@ def monitor(config: str, bot_name: Optional[str] = None):
 
         tasks = []
         eth_clients = []
+        ws_connectors = []
 
         for name, bot_cfg in bots_to_monitor.items():
             weth_contract = bot_cfg['token_contract_address'].lower()
@@ -123,6 +124,7 @@ def monitor(config: str, bot_name: Optional[str] = None):
             logging.info(f"Watched address: {watched_address}")
 
             ws = WsConnectorRaw(ws_rpc_url)
+            ws_connectors.append(ws)
             eth_client = EthClient(http_rpc_url)
             await eth_client.__aenter__()
             eth_clients.append(eth_client)
@@ -136,7 +138,11 @@ def monitor(config: str, bot_name: Optional[str] = None):
                 notifier.eth_client = eth_client
 
         if notifier:
-            await notifier.send_startup_message(bots_to_monitor)
+            async def send_startup_after_connect():
+                await asyncio.gather(*(ws.ready.wait() for ws in ws_connectors))
+                await notifier.send_startup_message(bots_to_monitor)
+
+            tasks.append(send_startup_after_connect())
             tasks.append(notifier.run_periodic_flush())
 
         try:

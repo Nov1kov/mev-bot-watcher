@@ -40,22 +40,27 @@ bots:
 
 ### Docker
 
+Мониторинг всех ботов:
 ```bash
-docker run -v ./config.yaml:/app/config.yaml nov1kov/mev-watcher \
-  python main.py monitor -c /app/config.yaml -b ethereum
+docker run -d -v ./config.yaml:/app/config.yaml nov1kov/mev-watcher
 ```
 
+Мониторинг конкретного бота:
 ```bash
-docker run -v ./config.yaml:/app/config.yaml nov1kov/mev-watcher \
-  python main.py analyze -c /app/config.yaml -b ethereum -s 18000000
+docker run -d -v ./config.yaml:/app/config.yaml nov1kov/mev-watcher monitor -b ethereum
+```
+
+Анализ блоков:
+```bash
+docker run -v ./config.yaml:/app/config.yaml nov1kov/mev-watcher analyze -b ethereum -s 18000000
 ```
 
 ### Локально
 
 ```bash
 pip install -r requirements.txt
-python main.py monitor -c config.yaml -b ethereum
-python main.py analyze -c config.yaml -b ethereum -s 18000000
+python main.py monitor
+python main.py analyze -b ethereum -s 18000000
 ```
 
 ## Тесты

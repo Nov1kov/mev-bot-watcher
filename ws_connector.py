@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from collections import deque
@@ -22,6 +23,7 @@ class WsConnectorRaw:
         self.node_url_ws = node_url_ws
         self.subscriptions: Dict[str, Callable] = {}
         self.subscription_setups = []
+        self.ready = asyncio.Event()
 
     async def __aenter__(self):
         return self
@@ -56,6 +58,7 @@ class WsConnectorRaw:
             await self.__send_subscription_requests(websocket)
             queue_requests = deque()
             await self.__proceed_subscriptions(websocket, queue_requests)
+            self.ready.set()
             try:
                 while True:
                     if len(queue_requests) == 0:
