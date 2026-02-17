@@ -17,11 +17,7 @@ Scans historical blocks or subscribes to new ones via WebSocket, finds transacti
 - **Multichain** — multiple networks via config (Ethereum, Arbitrum, etc.)
 - **Telegram notifications** — aggregated reports with configurable interval and USD prices
 
-## Setup
-
-```bash
-pip install -r requirements.txt
-```
+## Configuration
 
 Copy `config.example.yaml` to `config.yaml` and fill in your values:
 
@@ -42,38 +38,24 @@ bots:
 
 ## Usage
 
-**Analyze blocks:**
+### Docker
+
 ```bash
-python main.py analyze -c config.yaml -b ethereum -s 18000000
+docker run -v ./config.yaml:/app/config.yaml nov1kov/mev-watcher \
+  python main.py monitor -c /app/config.yaml -b ethereum
 ```
 
-**Monitor new blocks:**
 ```bash
-python main.py monitor -c config.yaml -b ethereum
-```
-
-## Docker
-
-**Build:**
-```bash
-docker build -t mev-watcher .
-```
-
-**Run:**
-```bash
-docker run -v ./config.yaml:/app/config.yaml mev-watcher
-```
-
-Monitor a specific bot:
-```bash
-docker run -v ./config.yaml:/app/config.yaml mev-watcher \
-  python main.py monitor -c /app/config.yaml -b arbitrum
-```
-
-Analyze blocks:
-```bash
-docker run -v ./config.yaml:/app/config.yaml mev-watcher \
+docker run -v ./config.yaml:/app/config.yaml nov1kov/mev-watcher \
   python main.py analyze -c /app/config.yaml -b ethereum -s 18000000
+```
+
+### Local
+
+```bash
+pip install -r requirements.txt
+python main.py monitor -c config.yaml -b ethereum
+python main.py analyze -c config.yaml -b ethereum -s 18000000
 ```
 
 ## Tests
@@ -81,7 +63,3 @@ docker run -v ./config.yaml:/app/config.yaml mev-watcher \
 ```bash
 python -m unittest discover tests
 ```
-
-## Stack
-
-Python 3.10+, aiohttp, websockets, Click, PyYAML

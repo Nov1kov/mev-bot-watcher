@@ -17,11 +17,7 @@ CLI-утилита для анализа и realtime-мониторинга пр
 - **Мультичейн** — поддержка нескольких сетей через конфиг (Ethereum, Arbitrum и др.)
 - **Telegram-уведомления** — агрегированные отчёты с настраиваемым интервалом и ценами в USD
 
-## Установка
-
-```bash
-pip install -r requirements.txt
-```
+## Конфигурация
 
 Скопируйте `config.example.yaml` в `config.yaml` и заполните своими значениями:
 
@@ -42,38 +38,24 @@ bots:
 
 ## Использование
 
-**Анализ блоков:**
+### Docker
+
 ```bash
-python main.py analyze -c config.yaml -b ethereum -s 18000000
+docker run -v ./config.yaml:/app/config.yaml nov1kov/mev-watcher \
+  python main.py monitor -c /app/config.yaml -b ethereum
 ```
 
-**Мониторинг новых блоков:**
 ```bash
-python main.py monitor -c config.yaml -b ethereum
-```
-
-## Docker
-
-**Сборка:**
-```bash
-docker build -t mev-watcher .
-```
-
-**Запуск:**
-```bash
-docker run -v ./config.yaml:/app/config.yaml mev-watcher
-```
-
-Мониторинг конкретного бота:
-```bash
-docker run -v ./config.yaml:/app/config.yaml mev-watcher \
-  python main.py monitor -c /app/config.yaml -b arbitrum
-```
-
-Анализ блоков:
-```bash
-docker run -v ./config.yaml:/app/config.yaml mev-watcher \
+docker run -v ./config.yaml:/app/config.yaml nov1kov/mev-watcher \
   python main.py analyze -c /app/config.yaml -b ethereum -s 18000000
+```
+
+### Локально
+
+```bash
+pip install -r requirements.txt
+python main.py monitor -c config.yaml -b ethereum
+python main.py analyze -c config.yaml -b ethereum -s 18000000
 ```
 
 ## Тесты
@@ -81,7 +63,3 @@ docker run -v ./config.yaml:/app/config.yaml mev-watcher \
 ```bash
 python -m unittest discover tests
 ```
-
-## Стек
-
-Python 3.10+, aiohttp, websockets, Click, PyYAML
