@@ -6,7 +6,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tx_analyzer import TxAnalyzer
+from tx_analyzer import TxAnalyzer, normalize_address
 
 WATCHED_ADDRESS = "0x0000000000deadbeef00112233445566778899aa"
 WETH_CONTRACT = "0x82af49447d8a07e3bd95bd0d56f35241523fbab1"
@@ -293,6 +293,62 @@ class TestAnalyzeBlockMatching(unittest.TestCase):
         result = asyncio.run(analyzer.analyze_block(block))
         self.assertIsNotNone(result)
         mock_client.get_transaction_receipt.assert_called_once_with("0xdef")
+
+
+class TestNormalizeAddress(unittest.TestCase):
+    """Тест нормализации адресов"""
+
+    def test_already_normal(self):
+        self.assertEqual(
+            normalize_address("0x0000000000deadbeef00112233445566778899aa"),
+            "0x0000000000deadbeef00112233445566778899aa")
+
+    def test_checksummed(self):
+        self.assertEqual(
+            normalize_address("0x0000000000DeAdBeEf00112233445566778899aA"),
+            "0x0000000000deadbeef00112233445566778899aa")
+
+    def test_short_address_without_padding(self):
+        """RPC может вернуть адрес без ведущих нулей"""
+        self.assertEqual(
+            normalize_address("0xdeadbeef00112233445566778899aa"),
+            "0x0000000000deadbeef00112233445566778899aa")
+
+    def test_no_prefix(self):
+        self.assertEqual(
+            normalize_address("0000000000deadbeef00112233445566778899aa"),
+            "0x0000000000deadbeef00112233445566778899aa")
+
+    def test_whitespace(self):
+        self.assertEqual(
+            normalize_address("  0x0000000000deadbeef00112233445566778899aa  "),
+            "0x0000000000deadbeef00112233445566778899aa")
+
+
+class TestAnalyzeBlockShortAddress(unittest.TestCase):
+    """Тест: адрес без ведущих нулей из RPC должен совпадать"""
+
+    def test_matches_short_to_address(self):
+        """RPC вернул to без leading zeros — должен совпасть"""
+        mock_client = MagicMock()
+        mock_client.get_transaction_receipt = AsyncMock(return_value=FAIL_RECEIPT)
+
+        analyzer = TxAnalyzer(mock_client, WETH_CONTRACT, WATCHED_ADDRESS)
+
+        block = {
+            "number": "0x1",
+            "transactions": [
+                {
+                    "from": "0xdeadbeef",
+                    # Адрес БЕЗ ведущих нулей — именно так может прийти из RPC
+                    "to": "0xDeAdBeEf00112233445566778899aA",
+                    "hash": "0xshort_test",
+                },
+            ],
+        }
+        result = asyncio.run(analyzer.analyze_block(block))
+        self.assertIsNotNone(result)
+        mock_client.get_transaction_receipt.assert_called_once_with("0xshort_test")
 
 
 if __name__ == "__main__":

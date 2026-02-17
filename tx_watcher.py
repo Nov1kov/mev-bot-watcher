@@ -2,7 +2,7 @@ import logging
 from typing import Optional
 
 from eth_client import EthClient
-from tx_analyzer import TxAnalyzer
+from tx_analyzer import TxAnalyzer, normalize_address
 from telegram_notifier import TelegramNotifier, TxEvent
 
 
@@ -10,8 +10,8 @@ class TxWatcher:
     def __init__(self, eth_client: EthClient, weth_contract_address: str, watched_address: str,
                  bot_name: str = "", notifier: Optional[TelegramNotifier] = None):
         self.eth_client = eth_client
-        self.weth_contract_address = weth_contract_address.lower()
-        self.watched_address = watched_address.lower()
+        self.weth_contract_address = normalize_address(weth_contract_address)
+        self.watched_address = normalize_address(watched_address)
         self.bot_name = bot_name
         self.notifier = notifier
         self.analyzer = TxAnalyzer(eth_client, weth_contract_address, watched_address)

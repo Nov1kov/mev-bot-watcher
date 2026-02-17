@@ -16,13 +16,21 @@ def parse_transfer_event(topics: List[str], data: str) -> tuple:
     return from_address, to_address, amount
 
 
+def normalize_address(addr: str) -> str:
+    """Нормализация Ethereum адреса: 0x + 40 hex символов, lowercase"""
+    addr = addr.strip().lower()
+    if addr.startswith('0x'):
+        addr = addr[2:]
+    return '0x' + addr.zfill(40)
+
+
 class TxAnalyzer:
     """Класс для анализа транзакций"""
 
     def __init__(self, eth_client: EthClient, weth_contract_address: str, watched_address: str):
         self.eth_client = eth_client
-        self.weth_contract_address = weth_contract_address.lower()
-        self.watched_address = watched_address.lower()
+        self.weth_contract_address = normalize_address(weth_contract_address)
+        self.watched_address = normalize_address(watched_address)
         self.ERC20_TRANSFER_TOPIC = ERC20_TRANSFER_TOPIC
 
     def parse_receipt(self, receipt: Dict, tx_hash: str) -> Dict:
@@ -34,11 +42,11 @@ class TxAnalyzer:
 
         for log in receipt['logs']:
             if (log['topics'][0].lower() == self.ERC20_TRANSFER_TOPIC
-                    and log['address'].lower() == self.weth_contract_address):
+                    and normalize_address(log['address']) == self.weth_contract_address):
                 from_address, to_address, amount = parse_transfer_event(log['topics'], log['data'])
-                if from_address.lower() == self.watched_address:
+                if from_address == self.watched_address:
                     outgoing_wei.append(amount)
-                if to_address.lower() == self.watched_address:
+                if to_address == self.watched_address:
                     incoming_wei.append(amount)
 
         return {
@@ -54,7 +62,9 @@ class TxAnalyzer:
         transactions_details = []
 
         for tx in block['transactions']:
-            if tx['from'].lower() == self.watched_address or (tx['to'] and tx['to'].lower() == self.watched_address):
+            tx_from = normalize_address(tx['from'])
+            tx_to = normalize_address(tx['to']) if tx['to'] else None
+            if tx_from == self.watched_address or (tx_to and tx_to == self.watched_address):
                 receipt = await self.eth_client.get_transaction_receipt(tx['hash'])
                 transactions_details.append(self.parse_receipt(receipt, tx['hash']))
 
