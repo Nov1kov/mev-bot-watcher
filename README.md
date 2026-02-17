@@ -1,47 +1,83 @@
-# MEV bot watcher
+# MEV Bot Watcher
 
-CLI-утилита для анализа прибыльности MEV-ботов на Ethereum и EVM-совместимых сетях.
+[Русская версия](README.ru.md)
 
-Сканирует блоки, находит транзакции отслеживаемого адреса, парсит ERC20 Transfer-события и рассчитывает P&L (входящие токены - исходящие токены - газ).
+CLI tool for analyzing MEV bot profitability on Ethereum and EVM-compatible networks.
 
-## Возможности
+Scans blocks, finds transactions of a watched address, parses ERC20 Transfer events and calculates P&L (incoming tokens - outgoing tokens - gas).
 
-- **Ретроспективный анализ** — сканирование диапазона блоков с расчётом прибыли по каждому блоку и итоговой суммы
-- **Realtime-мониторинг** — подписка на новые блоки через WebSocket
-- **Мультичейн** — поддержка нескольких сетей через конфиг (Ethereum, Arbitrum и др.)
+## Features
 
-## Установка
+- **Retrospective analysis** — scan a range of blocks, calculate profit per block and total summary
+- **Realtime monitoring** — subscribe to new blocks via WebSocket
+- **Multichain** — multiple networks via config (Ethereum, Arbitrum, etc.)
+- **Telegram notifications** — aggregated reports with configurable interval and USD prices
+
+## Setup
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## Настройка
-
-Отредактируйте `config.yaml`:
+Copy `config.example.yaml` to `config.yaml` and fill in your values:
 
 ```yaml
+telegram:
+  bot_token: 'YOUR_BOT_TOKEN'
+  chat_id: 'YOUR_CHAT_ID'
+  notify_interval_minutes: 60
+
 bots:
   ethereum:
     blockchain: ethereum
-    token_contract_address: '0x...'  # адрес отслеживаемого токена (WETH)
-    watched_address: '0x...'         # адрес MEV-бота
-    http_rpc_url: 'https://...'
-    ws_rpc_url: 'wss://...'
+    token_contract_address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
+    watched_address: '0xYOUR_BOT_ADDRESS'
+    http_rpc_url: 'https://your-rpc-provider.com/api-key'
+    ws_rpc_url: 'wss://your-rpc-provider.com/api-key'
 ```
 
-## Использование
+## Usage
 
-**Анализ блоков:**
+**Analyze blocks:**
 ```bash
 python main.py analyze -c config.yaml -b ethereum -s 18000000
 ```
 
-**Мониторинг новых блоков:**
+**Monitor new blocks:**
 ```bash
 python main.py monitor -c config.yaml -b ethereum
 ```
 
-## Стек
+## Docker
+
+**Build:**
+```bash
+docker build -t mev-watcher .
+```
+
+**Run:**
+```bash
+docker run -v ./config.yaml:/app/config.yaml mev-watcher
+```
+
+Monitor a specific bot:
+```bash
+docker run -v ./config.yaml:/app/config.yaml mev-watcher \
+  python main.py monitor -c /app/config.yaml -b arbitrum
+```
+
+Analyze blocks:
+```bash
+docker run -v ./config.yaml:/app/config.yaml mev-watcher \
+  python main.py analyze -c /app/config.yaml -b ethereum -s 18000000
+```
+
+## Tests
+
+```bash
+python -m unittest discover tests
+```
+
+## Stack
 
 Python 3.10+, aiohttp, websockets, Click, PyYAML

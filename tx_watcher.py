@@ -37,6 +37,7 @@ class TxWatcher:
         if self.notifier:
             await self.notifier.add_event(TxEvent(
                 bot_name=self.bot_name,
+                watched_address=self.watched_address,
                 block_number=block_summary['block_number'],
                 tx_count=block_summary['tx_count'],
                 fail_count=block_summary['fail_count'],

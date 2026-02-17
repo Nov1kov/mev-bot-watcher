@@ -132,6 +132,9 @@ def monitor(config: str, bot_name: Optional[str] = None):
             await watcher.subscribe(ws)
             tasks.append(ws.run())
 
+            if notifier and not notifier.eth_client:
+                notifier.eth_client = eth_client
+
         if notifier:
             await notifier.send_startup_message(bots_to_monitor)
             tasks.append(notifier.run_periodic_flush())

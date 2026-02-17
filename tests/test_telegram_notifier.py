@@ -16,6 +16,7 @@ class TestFormatReport(unittest.TestCase):
     def test_single_profitable_event(self):
         events = [TxEvent(
             bot_name="ethereum",
+            watched_address="0x1234567890abcdef1234567890abcdef12345678",
             block_number=18000000,
             tx_count=1,
             fail_count=0,
@@ -24,6 +25,7 @@ class TestFormatReport(unittest.TestCase):
         )]
         msg = format_report(events)
         self.assertIn("ETHEREUM", msg)
+        self.assertIn("0x1234...5678", msg)  # short address
         self.assertIn("\u2705", msg)  # profit emoji
         self.assertIn("+0.001000", msg)
         self.assertIn("Транзакций: 1", msg)
@@ -32,6 +34,7 @@ class TestFormatReport(unittest.TestCase):
     def test_single_losing_event(self):
         events = [TxEvent(
             bot_name="ethereum",
+            watched_address="0x1234567890abcdef1234567890abcdef12345678",
             block_number=18000000,
             tx_count=1,
             fail_count=1,
@@ -44,54 +47,72 @@ class TestFormatReport(unittest.TestCase):
         self.assertIn("-0.000500", msg)
 
     def test_zero_profit(self):
-        events = [TxEvent("ethereum", 100, 1, 0, 0, 0)]
+        events = [TxEvent("ethereum", "0x1234567890abcdef1234567890abcdef12345678", 100, 1, 0, 0, 0)]
         msg = format_report(events)
         self.assertIn("\u2796", msg)  # neutral emoji
 
     def test_multiple_bots(self):
         events = [
-            TxEvent("ethereum", 100, 2, 0, 1_000_000_000_000_000, 200_000_000_000_000),
-            TxEvent("arbitrum", 200, 3, 1, -500_000_000_000_000, 300_000_000_000_000),
+            TxEvent("ethereum", "0x1234567890abcdef1234567890abcdef12345678", 100, 2, 0, 1_000_000_000_000_000, 200_000_000_000_000),
+            TxEvent("arbitrum", "0xabcdef1234567890abcdef1234567890abcdef12", 200, 3, 1, -500_000_000_000_000, 300_000_000_000_000),
         ]
         msg = format_report(events)
         self.assertIn("ETHEREUM", msg)
         self.assertIn("ARBITRUM", msg)
-        # ethereum profitable, arbitrum loss
-        eth_pos = msg.index("ETHEREUM")
-        arb_pos = msg.index("ARBITRUM")
-        eth_section = msg[eth_pos:arb_pos]
-        arb_section = msg[arb_pos:]
-        self.assertIn("\u2705", eth_section)
-        self.assertIn("\u274c", arb_section)
+        # emoji is on the same line as bot name: "{emoji} *{BOT_NAME}*"
+        # find the line containing each bot name and check its emoji
+        lines = msg.split("\n")
+        eth_line = next(l for l in lines if "ETHEREUM" in l)
+        arb_line = next(l for l in lines if "ARBITRUM" in l)
+        self.assertIn("\u2705", eth_line)
+        self.assertIn("\u274c", arb_line)
 
     def test_aggregation_same_bot(self):
         events = [
-            TxEvent("ethereum", 100, 1, 0, 1_000_000_000_000_000, 100_000_000_000_000),
-            TxEvent("ethereum", 101, 2, 1, 2_000_000_000_000_000, 200_000_000_000_000),
+            TxEvent("ethereum", "0x1234567890abcdef1234567890abcdef12345678", 100, 1, 0, 1_000_000_000_000_000, 100_000_000_000_000),
+            TxEvent("ethereum", "0x1234567890abcdef1234567890abcdef12345678", 101, 2, 1, 2_000_000_000_000_000, 200_000_000_000_000),
         ]
         msg = format_report(events)
         self.assertIn("Транзакций: 3", msg)
         self.assertIn("Блоков: 2", msg)
         self.assertIn("Неудачных: 1", msg)
         self.assertIn("+0.003000", msg)
-        self.assertIn("0.000300", msg)  # gas
 
     def test_no_fails_line_when_zero(self):
-        events = [TxEvent("ethereum", 100, 3, 0, 1_000_000_000_000_000, 100_000_000_000_000)]
+        events = [TxEvent("ethereum", "0x1234567890abcdef1234567890abcdef12345678", 100, 3, 0, 1_000_000_000_000_000, 100_000_000_000_000)]
         msg = format_report(events)
         self.assertNotIn("Неудачных", msg)
 
-    def test_gas_display(self):
-        events = [TxEvent("ethereum", 100, 1, 0, 0, 3_500_000_000_000_000)]
+    def test_no_gas_line(self):
+        events = [TxEvent("ethereum", "0x1234567890abcdef1234567890abcdef12345678", 100, 1, 0, 0, 3_500_000_000_000_000)]
         msg = format_report(events)
-        self.assertIn("0.003500", msg)
+        self.assertNotIn("Gas:", msg)
+
+    def test_usd_price_shown(self):
+        events = [TxEvent(
+            bot_name="ethereum",
+            watched_address="0x1234567890abcdef1234567890abcdef12345678",
+            block_number=100,
+            tx_count=1,
+            fail_count=0,
+            net_wei_change=1_000_000_000_000_000_000,  # +1 ETH
+            gas_fee_wei=0,
+        )]
+        msg = format_report(events, eth_price_usd=2500.0)
+        self.assertIn("+1.000000 ETH", msg)
+        self.assertIn("$+2500.00", msg)
+
+    def test_no_usd_when_price_none(self):
+        events = [TxEvent("ethereum", "0x1234567890abcdef1234567890abcdef12345678", 100, 1, 0, 1_000_000_000_000_000, 0)]
+        msg = format_report(events)
+        self.assertNotIn("$", msg)
 
 
 class TestTelegramNotifierBatching(unittest.TestCase):
     """Тесты логики батчинга уведомлений"""
 
     def _make_event(self, bot="ethereum", net=1_000_000_000_000_000, gas=100_000_000_000_000):
-        return TxEvent(bot, 100, 1, 0, net, gas)
+        return TxEvent(bot, "0x1234567890abcdef1234567890abcdef12345678", 100, 1, 0, net, gas)
 
     def test_flushes_when_interval_passed(self):
         notifier = TelegramNotifier("token", "chat", notify_interval_minutes=1)
@@ -199,14 +220,15 @@ class TestTxEvent(unittest.TestCase):
 
     def test_default_timestamp(self):
         before = time.time()
-        event = TxEvent("ethereum", 100, 1, 0, 1000, 500)
+        event = TxEvent("ethereum", "0x1234567890abcdef1234567890abcdef12345678", 100, 1, 0, 1000, 500)
         after = time.time()
         self.assertGreaterEqual(event.timestamp, before)
         self.assertLessEqual(event.timestamp, after)
 
     def test_fields(self):
-        event = TxEvent("arbitrum", 200, 3, 1, -500, 300)
+        event = TxEvent("arbitrum", "0xabcdef1234567890abcdef1234567890abcdef12", 200, 3, 1, -500, 300)
         self.assertEqual(event.bot_name, "arbitrum")
+        self.assertEqual(event.watched_address, "0xabcdef1234567890abcdef1234567890abcdef12")
         self.assertEqual(event.block_number, 200)
         self.assertEqual(event.tx_count, 3)
         self.assertEqual(event.fail_count, 1)
