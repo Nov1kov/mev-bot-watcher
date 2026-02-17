@@ -1,5 +1,9 @@
 # MEV Bot Watcher
 
+[![Tests](https://github.com/Nov1kov/mev-bot-watcher/actions/workflows/tests.yml/badge.svg)](https://github.com/Nov1kov/mev-bot-watcher/actions/workflows/tests.yml)
+[![Docker](https://img.shields.io/docker/v/nov1kov/mev-watcher?label=docker&sort=semver)](https://hub.docker.com/r/nov1kov/mev-watcher)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 [Русская версия](README.ru.md)
 
 CLI tool for analyzing and realtime monitoring of MEV bot profitability on EVM-compatible networks (Ethereum, Arbitrum, etc.).
