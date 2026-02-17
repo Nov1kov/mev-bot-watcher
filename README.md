@@ -2,9 +2,9 @@
 
 [Русская версия](README.ru.md)
 
-CLI tool for analyzing MEV bot profitability on Ethereum and EVM-compatible networks.
+CLI tool for analyzing and realtime monitoring of MEV bot profitability on EVM-compatible networks (Ethereum, Arbitrum, etc.).
 
-Scans blocks, finds transactions of a watched address, parses ERC20 Transfer events and calculates P&L (incoming tokens - outgoing tokens - gas).
+Scans historical blocks or subscribes to new ones via WebSocket, finds transactions of a watched address, parses ERC20 Transfer events and calculates P&L (incoming tokens - outgoing tokens - gas).
 
 ## Features
 
