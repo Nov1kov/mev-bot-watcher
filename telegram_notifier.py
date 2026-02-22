@@ -2,9 +2,11 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import List, Dict, Optional
 
 import aiohttp
+from croniter import croniter
 
 
 @dataclass
@@ -23,21 +25,26 @@ class TxEvent:
 class TelegramNotifier:
     """Агрегированные уведомления в Telegram с контролем частоты отправки"""
 
-    def __init__(self, bot_token: str, chat_id: str, notify_interval_minutes: int = 60,
+    def __init__(self, bot_token: str, chat_id: str, notify_schedule: str = "0 * * * *",
                  eth_client=None):
         self.bot_token = bot_token
         self.chat_id = chat_id
-        self.notify_interval = notify_interval_minutes * 60
+        self.notify_schedule = notify_schedule
         self.eth_client = eth_client
         self._pending: List[TxEvent] = []
         self._last_sent: float = 0.0
         self._lock = asyncio.Lock()
 
+    def _seconds_until_next(self) -> float:
+        cron = croniter(self.notify_schedule, datetime.now())
+        next_time = cron.get_next(float)
+        return max(0, next_time - time.time())
+
     async def add_event(self, event: TxEvent):
-        """Добавить событие. Отправит сразу если прошло достаточно времени с последней отправки."""
+        """Добавить событие. Отправит сразу если это первое событие."""
         async with self._lock:
             self._pending.append(event)
-            if time.time() - self._last_sent >= self.notify_interval:
+            if self._last_sent == 0.0:
                 await self._flush()
 
     async def force_flush(self):
@@ -80,7 +87,6 @@ class TelegramNotifier:
 
     async def send_startup_message(self, bots: Dict[str, Dict]):
         """Отправить приветственное сообщение при запуске мониторинга"""
-        interval = self.notify_interval // 60
         lines = ["\U0001f680 *MEV Monitor Started*", ""]
         for name, cfg in bots.items():
             chain = cfg.get('blockchain', 'unknown').capitalize()
@@ -88,13 +94,14 @@ class TelegramNotifier:
             lines.append(f"\u2022 *{name}* \u2014 {chain}")
             lines.append(f"  `{addr}`")
         lines.append("")
-        lines.append(f"\u23f0 Уведомления: раз в {interval} мин")
+        lines.append(f"\u23f0 Schedule: `{self.notify_schedule}`")
         await self._send("\n".join(lines))
 
     async def run_periodic_flush(self):
-        """Фоновая задача: периодически отправляет накопленные события"""
+        """Фоновая задача: отправляет накопленные события по cron-расписанию"""
         while True:
-            await asyncio.sleep(self.notify_interval)
+            delay = self._seconds_until_next()
+            await asyncio.sleep(delay)
             await self.force_flush()
 
 
@@ -110,7 +117,7 @@ def format_report(events: List[TxEvent], eth_price_usd: Optional[float] = None) 
         total_net = sum(e.net_wei_change for e in bot_events)
         total_txs = sum(e.tx_count for e in bot_events)
         total_fails = sum(e.fail_count for e in bot_events)
-        blocks = len(bot_events)
+        successful = total_txs - total_fails
         addr = bot_events[0].watched_address
         short_addr = f"{addr[:6]}...{addr[-4:]}"
 
@@ -125,11 +132,8 @@ def format_report(events: List[TxEvent], eth_price_usd: Optional[float] = None) 
 
         lines.append(f"{emoji} *{bot_name.upper()}*")
         lines.append(f"`{short_addr}`")
-        lines.append(f"\u251c Блоков: {blocks}")
-        lines.append(f"\u251c Транзакций: {total_txs}")
-        if total_fails:
-            lines.append(f"\u251c Неудачных: {total_fails}")
-        total_line = f"\u2514 Итого: `{net_eth:+.6f} ETH"
+        lines.append(f"\u251c Successful txs: {successful}/{total_txs}")
+        total_line = f"\u2514 Total: `{net_eth:+.6f} ETH"
         if eth_price_usd:
             usd_value = net_eth * eth_price_usd
             total_line += f" (${usd_value:+.2f})"

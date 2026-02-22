@@ -1,8 +1,12 @@
-# Telegram уведомления (опционально)
+# Telegram notifications (optional)
 # telegram:
 #   bot_token: 'YOUR_BOT_TOKEN'
 #   chat_id: 'YOUR_CHAT_ID'
-#   notify_interval_minutes: 60  # не чаще чем раз в N минут
+#   notify_schedule: '0 * * * *'   # cron syntax
+#     # '*/10 * * * *'   — every 10 minutes
+#     # '0 * * * *'      — every hour (default)
+#     # '0 */6 * * *'    — every 6 hours
+#     # '0 9,21 * * *'   — at 9:00 and 21:00 daily
 
 bots:
   ethereum:

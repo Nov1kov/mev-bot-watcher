@@ -1,7 +1,7 @@
 import asyncio
 import time
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import sys
 import os
@@ -28,8 +28,7 @@ class TestFormatReport(unittest.TestCase):
         self.assertIn("0x1234...5678", msg)  # short address
         self.assertIn("\u2705", msg)  # profit emoji
         self.assertIn("+0.001000", msg)
-        self.assertIn("Транзакций: 1", msg)
-        self.assertNotIn("Неудачных", msg)
+        self.assertIn("Successful txs: 1/1", msg)
 
     def test_single_losing_event(self):
         events = [TxEvent(
@@ -59,8 +58,6 @@ class TestFormatReport(unittest.TestCase):
         msg = format_report(events)
         self.assertIn("ETHEREUM", msg)
         self.assertIn("ARBITRUM", msg)
-        # emoji is on the same line as bot name: "{emoji} *{BOT_NAME}*"
-        # find the line containing each bot name and check its emoji
         lines = msg.split("\n")
         eth_line = next(l for l in lines if "ETHEREUM" in l)
         arb_line = next(l for l in lines if "ARBITRUM" in l)
@@ -114,18 +111,18 @@ class TestTelegramNotifierBatching(unittest.TestCase):
     def _make_event(self, bot="ethereum", net=1_000_000_000_000_000, gas=100_000_000_000_000):
         return TxEvent(bot, "0x1234567890abcdef1234567890abcdef12345678", 100, 1, 0, net, gas)
 
-    def test_flushes_when_interval_passed(self):
-        notifier = TelegramNotifier("token", "chat", notify_interval_minutes=1)
-        notifier._last_sent = time.time() - 120  # 2 min ago
+    def test_first_event_sends_immediately(self):
+        """Первое событие должно отправиться сразу (_last_sent == 0)"""
+        notifier = TelegramNotifier("token", "chat", notify_schedule="0 * * * *")
         notifier._send = AsyncMock()
 
         asyncio.run(notifier.add_event(self._make_event()))
 
         notifier._send.assert_called_once()
-        self.assertEqual(len(notifier._pending), 0)
 
-    def test_batches_when_interval_not_passed(self):
-        notifier = TelegramNotifier("token", "chat", notify_interval_minutes=60)
+    def test_second_event_batched(self):
+        """После первой отправки события накапливаются до следующего cron-тика"""
+        notifier = TelegramNotifier("token", "chat", notify_schedule="0 * * * *")
         notifier._last_sent = time.time()
         notifier._send = AsyncMock()
 
@@ -135,7 +132,7 @@ class TestTelegramNotifierBatching(unittest.TestCase):
         self.assertEqual(len(notifier._pending), 1)
 
     def test_multiple_events_batched(self):
-        notifier = TelegramNotifier("token", "chat", notify_interval_minutes=60)
+        notifier = TelegramNotifier("token", "chat", notify_schedule="0 * * * *")
         notifier._last_sent = time.time()
         notifier._send = AsyncMock()
 
@@ -150,7 +147,7 @@ class TestTelegramNotifierBatching(unittest.TestCase):
         self.assertEqual(len(notifier._pending), 3)
 
     def test_force_flush_sends(self):
-        notifier = TelegramNotifier("token", "chat", notify_interval_minutes=60)
+        notifier = TelegramNotifier("token", "chat", notify_schedule="0 * * * *")
         notifier._send = AsyncMock()
         notifier._pending = [self._make_event(), self._make_event()]
 
@@ -160,7 +157,7 @@ class TestTelegramNotifierBatching(unittest.TestCase):
         self.assertEqual(len(notifier._pending), 0)
 
     def test_force_flush_empty_does_nothing(self):
-        notifier = TelegramNotifier("token", "chat", notify_interval_minutes=60)
+        notifier = TelegramNotifier("token", "chat", notify_schedule="0 * * * *")
         notifier._send = AsyncMock()
 
         asyncio.run(notifier.force_flush())
@@ -168,8 +165,7 @@ class TestTelegramNotifierBatching(unittest.TestCase):
         notifier._send.assert_not_called()
 
     def test_flush_updates_last_sent(self):
-        notifier = TelegramNotifier("token", "chat", notify_interval_minutes=1)
-        notifier._last_sent = 0  # long ago
+        notifier = TelegramNotifier("token", "chat", notify_schedule="0 * * * *")
         notifier._send = AsyncMock()
 
         before = time.time()
@@ -179,17 +175,8 @@ class TestTelegramNotifierBatching(unittest.TestCase):
         self.assertGreaterEqual(notifier._last_sent, before)
         self.assertLessEqual(notifier._last_sent, after)
 
-    def test_first_event_sends_immediately(self):
-        """Первое событие должно отправиться сразу (_last_sent == 0)"""
-        notifier = TelegramNotifier("token", "chat", notify_interval_minutes=60)
-        notifier._send = AsyncMock()
-
-        asyncio.run(notifier.add_event(self._make_event()))
-
-        notifier._send.assert_called_once()
-
     def test_startup_message(self):
-        notifier = TelegramNotifier("token", "chat", notify_interval_minutes=30)
+        notifier = TelegramNotifier("token", "chat", notify_schedule="*/30 * * * *")
         notifier._send = AsyncMock()
 
         bots = {
@@ -211,8 +198,14 @@ class TestTelegramNotifierBatching(unittest.TestCase):
         self.assertIn("arbitrum", msg)
         self.assertIn("Ethereum", msg)
         self.assertIn("Arbitrum", msg)
-        self.assertIn("30 мин", msg)
+        self.assertIn("*/30 * * * *", msg)
         self.assertIn("0xc0c9c680a96cf92604a94cff927c0ad674450191", msg)
+
+    def test_seconds_until_next(self):
+        notifier = TelegramNotifier("token", "chat", notify_schedule="* * * * *")
+        delay = notifier._seconds_until_next()
+        self.assertGreaterEqual(delay, 0)
+        self.assertLessEqual(delay, 60)
 
 
 class TestTxEvent(unittest.TestCase):

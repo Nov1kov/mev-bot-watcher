@@ -102,12 +102,13 @@ def monitor(config: str, bot_name: Optional[str] = None):
         notifier = None
         if telegram_config and telegram_config.get('bot_token'):
             from telegram_notifier import TelegramNotifier
+            schedule = telegram_config.get('notify_schedule', '0 * * * *')
             notifier = TelegramNotifier(
                 bot_token=telegram_config['bot_token'],
                 chat_id=str(telegram_config['chat_id']),
-                notify_interval_minutes=telegram_config.get('notify_interval_minutes', 60),
+                notify_schedule=schedule,
             )
-            logging.info(f"Telegram notifications enabled (interval: {telegram_config.get('notify_interval_minutes', 60)} min)")
+            logging.info(f"Telegram notifications enabled (schedule: {schedule})")
 
         tasks = []
         eth_clients = []
