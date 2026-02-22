@@ -25,7 +25,7 @@ Copy `config.example.yaml` to `config.yaml` and fill in your values:
 telegram:
   bot_token: 'YOUR_BOT_TOKEN'
   chat_id: 'YOUR_CHAT_ID'
-  notify_interval_minutes: 60
+  notify_schedule: '0 * * * *'  # cron syntax (every hour)
 
 bots:
   ethereum:
@@ -34,6 +34,26 @@ bots:
     watched_address: '0xYOUR_BOT_ADDRESS'
     http_rpc_url: 'https://your-rpc-provider.com/api-key'
     ws_rpc_url: 'wss://your-rpc-provider.com/api-key'
+```
+
+## Telegram notifications
+
+Startup message:
+```
+🚀 MEV Monitor Started
+
+• ethereum — Ethereum
+  0xYOUR_BOT_ADDRESS
+
+⏰ Schedule: 0 * * * *
+```
+
+Periodic report:
+```
+✅ ETHEREUM
+0x1234...5678
+├ Successful txs: 3/4
+└ Total: +0.001000 ETH ($+2.50)
 ```
 
 ## Usage

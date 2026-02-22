@@ -42,7 +42,7 @@ class TestFormatReport(unittest.TestCase):
         )]
         msg = format_report(events)
         self.assertIn("\u274c", msg)  # loss emoji
-        self.assertIn("Неудачных: 1", msg)
+        self.assertIn("Successful txs: 0/1", msg)
         self.assertIn("-0.000500", msg)
 
     def test_zero_profit(self):
@@ -70,15 +70,13 @@ class TestFormatReport(unittest.TestCase):
             TxEvent("ethereum", "0x1234567890abcdef1234567890abcdef12345678", 101, 2, 1, 2_000_000_000_000_000, 200_000_000_000_000),
         ]
         msg = format_report(events)
-        self.assertIn("Транзакций: 3", msg)
-        self.assertIn("Блоков: 2", msg)
-        self.assertIn("Неудачных: 1", msg)
+        self.assertIn("Successful txs: 2/3", msg)
         self.assertIn("+0.003000", msg)
 
-    def test_no_fails_line_when_zero(self):
+    def test_all_successful(self):
         events = [TxEvent("ethereum", "0x1234567890abcdef1234567890abcdef12345678", 100, 3, 0, 1_000_000_000_000_000, 100_000_000_000_000)]
         msg = format_report(events)
-        self.assertNotIn("Неудачных", msg)
+        self.assertIn("Successful txs: 3/3", msg)
 
     def test_no_gas_line(self):
         events = [TxEvent("ethereum", "0x1234567890abcdef1234567890abcdef12345678", 100, 1, 0, 0, 3_500_000_000_000_000)]
