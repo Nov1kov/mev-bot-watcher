@@ -21,12 +21,26 @@ def get_bot_config_by_name(config: Dict, bot_name: str) -> Optional[Dict]:
     """Получение конфигурации бота по имени"""
     if 'bots' not in config:
         return None
-    
+
     for name, bot_config in config['bots'].items():
         if name == bot_name:
             return bot_config
-    
+
     return None
+
+
+def parse_ws_rpc(ws_rpc) -> tuple:
+    """Разбирает ws_rpc_url как строку или dict с login/password.
+
+    Returns (url, login, password). login/password = None если не заданы.
+    """
+    if ws_rpc is None:
+        return None, None, None
+    if isinstance(ws_rpc, str):
+        return ws_rpc, None, None
+    if isinstance(ws_rpc, dict):
+        return ws_rpc.get('url'), ws_rpc.get('login'), ws_rpc.get('password')
+    raise ValueError(f"ws_rpc_url must be string or dict, got {type(ws_rpc).__name__}")
 
 
 @click.group()
@@ -117,14 +131,14 @@ def monitor(config: str, bot_name: Optional[str] = None):
         for name, bot_cfg in bots_to_monitor.items():
             weth_contract = bot_cfg['token_contract_address'].lower()
             watched_address = bot_cfg['watched_address'].lower()
-            ws_rpc_url = bot_cfg.get('ws_rpc_url')
+            ws_url, ws_login, ws_password = parse_ws_rpc(bot_cfg.get('ws_rpc_url'))
             http_rpc_url = bot_cfg.get('http_rpc_url')
 
             logging.info(f"Setting up monitoring for bot '{name}':")
             logging.info(f"Token contract: {weth_contract}")
             logging.info(f"Watched address: {watched_address}")
 
-            ws = WsConnectorRaw(ws_rpc_url)
+            ws = WsConnectorRaw(ws_url, login=ws_login, password=ws_password, name=name)
             ws_connectors.append(ws)
             eth_client = EthClient(http_rpc_url)
             await eth_client.__aenter__()

@@ -36,6 +36,25 @@ bots:
     ws_rpc_url: 'wss://your-rpc-provider.com/api-key'
 ```
 
+### WebSocket with Basic Auth
+
+If your WebSocket endpoint requires HTTP Basic authentication, pass `ws_rpc_url`
+as a nested block with `url`, `login` and `password` fields. Plain string form
+stays supported for endpoints without auth.
+
+```yaml
+bots:
+  my_node:
+    blockchain: arbitrum
+    token_contract_address: '0x...'
+    watched_address: '0xYOUR_BOT_ADDRESS'
+    http_rpc_url: 'http://user:pass@your-node-ip:8549'
+    ws_rpc_url:
+      url: 'ws://your-node-ip:8549'
+      login: 'your_login'
+      password: 'your_password'
+```
+
 ## Telegram notifications
 
 Startup message:

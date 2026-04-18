@@ -22,3 +22,14 @@ bots:
     watched_address: '0xYOUR_BOT_ADDRESS'
     http_rpc_url: 'https://your-rpc-provider.com/api-key'
     ws_rpc_url: 'ws://your-node-ip:8550'
+
+  # Example with Basic Auth over WebSocket (login/password as a sub-section):
+  # monad:
+  #   blockchain: monad
+  #   token_contract_address: '0x...'
+  #   watched_address: '0xYOUR_BOT_ADDRESS'
+  #   http_rpc_url: 'http://user:pass@your-node-ip:8549'
+  #   ws_rpc_url:
+  #     url: 'ws://your-node-ip:8549'
+  #     login: 'your_login'
+  #     password: 'your_password'
