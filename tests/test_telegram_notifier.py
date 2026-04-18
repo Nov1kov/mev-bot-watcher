@@ -179,11 +179,9 @@ class TestTelegramNotifierBatching(unittest.TestCase):
 
         bots = {
             "ethereum": {
-                "blockchain": "ethereum",
                 "watched_address": "0xc0c9c680a96cf92604a94cff927c0ad674450191",
             },
             "arbitrum": {
-                "blockchain": "arbitrum",
                 "watched_address": "0x0000000000DeAdBeEf00112233445566778899aA",
             },
         }
@@ -194,8 +192,6 @@ class TestTelegramNotifierBatching(unittest.TestCase):
         self.assertIn("Monitor Started", msg)
         self.assertIn("ethereum", msg)
         self.assertIn("arbitrum", msg)
-        self.assertIn("Ethereum", msg)
-        self.assertIn("Arbitrum", msg)
         self.assertIn("*/30 * * * *", msg)
         self.assertIn("0xc0c9c680a96cf92604a94cff927c0ad674450191", msg)
 

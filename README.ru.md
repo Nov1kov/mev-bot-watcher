@@ -29,7 +29,6 @@ telegram:
 
 bots:
   ethereum:
-    blockchain: ethereum
     token_contract_address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
     watched_address: '0x...'
     http_rpc_url: 'https://your-rpc-provider.com/api-key'
@@ -45,7 +44,6 @@ bots:
 ```yaml
 bots:
   my_node:
-    blockchain: arbitrum
     token_contract_address: '0x...'
     watched_address: '0xYOUR_BOT_ADDRESS'
     http_rpc_url: 'http://user:pass@your-node-ip:8549'
@@ -61,7 +59,7 @@ bots:
 ```
 🚀 MEV Monitor Started
 
-• ethereum — Ethereum
+• ethereum
   0xYOUR_BOT_ADDRESS
 
 ⏰ Schedule: 0 * * * *

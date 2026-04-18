@@ -89,9 +89,8 @@ class TelegramNotifier:
         """Отправить приветственное сообщение при запуске мониторинга"""
         lines = ["\U0001f680 *MEV Monitor Started*", ""]
         for name, cfg in bots.items():
-            chain = cfg.get('blockchain', 'unknown').capitalize()
             addr = cfg.get('watched_address', '')
-            lines.append(f"\u2022 *{name}* \u2014 {chain}")
+            lines.append(f"\u2022 *{name}*")
             lines.append(f"  `{addr}`")
         lines.append("")
         lines.append(f"\u23f0 Schedule: `{self.notify_schedule}`")
