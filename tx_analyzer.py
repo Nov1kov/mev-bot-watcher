@@ -6,6 +6,8 @@ from eth_client import EthClient
 from coingecko_client import CoinGeckoClient
 
 ERC20_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+WETH_DEPOSIT_TOPIC = "0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c"
+WETH_WITHDRAWAL_TOPIC = "0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65"
 
 
 def parse_transfer_event(topics: List[str], data: str) -> tuple:
@@ -15,6 +17,13 @@ def parse_transfer_event(topics: List[str], data: str) -> tuple:
     to_address = "0x" + topics[2][-40:].lower()
     amount = int(data, 16)
     return from_address, to_address, amount
+
+
+def parse_single_address_event(topics: List[str], data: str) -> tuple:
+    """Разбор события с одним индексированным адресом и uint256: Deposit / Withdrawal."""
+    address = "0x" + topics[1][-40:].lower()
+    amount = int(data, 16)
+    return address, amount
 
 
 def normalize_address(addr: str) -> str:
@@ -41,20 +50,35 @@ class TxAnalyzer:
         self.token_symbol = token_symbol
 
     def parse_receipt(self, receipt: Dict, tx_hash: str) -> Dict:
-        """Разбор receipt транзакции: gas, статус, входящие/исходящие трансферы"""
+        """Разбор receipt транзакции: gas, статус, входящие/исходящие трансферы.
+
+        Учитываются события только на WETH-контракте: ERC20 Transfer,
+        WETH Deposit(dst, wad) и WETH Withdrawal(src, wad). Последние два
+        не эмитят Transfer, но изменяют баланс WETH отслеживаемого адреса.
+        """
         incoming_wei = []
         outgoing_wei = []
         gas_fee_wei = int(receipt['gasUsed'], 16) * int(receipt['effectiveGasPrice'], 16)
         status = int(receipt['status'], 16)
 
         for log in receipt['logs']:
-            if (log['topics'][0].lower() == self.ERC20_TRANSFER_TOPIC
-                    and normalize_address(log['address']) == self.weth_contract_address):
+            if normalize_address(log['address']) != self.weth_contract_address:
+                continue
+            topic0 = log['topics'][0].lower()
+            if topic0 == self.ERC20_TRANSFER_TOPIC:
                 from_address, to_address, amount = parse_transfer_event(log['topics'], log['data'])
                 if from_address == self.watched_address:
                     outgoing_wei.append(amount)
                 if to_address == self.watched_address:
                     incoming_wei.append(amount)
+            elif topic0 == WETH_DEPOSIT_TOPIC:
+                dst, amount = parse_single_address_event(log['topics'], log['data'])
+                if dst == self.watched_address:
+                    incoming_wei.append(amount)
+            elif topic0 == WETH_WITHDRAWAL_TOPIC:
+                src, amount = parse_single_address_event(log['topics'], log['data'])
+                if src == self.watched_address:
+                    outgoing_wei.append(amount)
 
         return {
             "status": status,
@@ -121,25 +145,31 @@ class TxAnalyzer:
         return block_summary
 
     async def get_relevant_blocks(self, start_block: int, end_block: int, chunk_size: int = 10000) -> set:
-        """Поиск блоков с WETH-трансферами watched_address через eth_getLogs"""
+        """Поиск блоков, затрагивающих баланс WETH watched_address, через eth_getLogs.
+
+        Покрывает те же события, что и parse_receipt: ERC20 Transfer (в обе стороны),
+        WETH Deposit(dst=watched) и WETH Withdrawal(src=watched).
+        """
         padded_address = "0x" + self.watched_address[2:].zfill(64)
+        # Transfer.from, Deposit.dst, Withdrawal.src — индексированы в topics[1]
+        topic1_events = [self.ERC20_TRANSFER_TOPIC, WETH_DEPOSIT_TOPIC, WETH_WITHDRAWAL_TOPIC]
         block_numbers = set()
 
         for from_block in range(start_block, end_block + 1, chunk_size):
             to_block = min(from_block + chunk_size - 1, end_block)
 
-            logs_from = await self.eth_client.get_logs(
+            logs_topic1 = await self.eth_client.get_logs(
                 from_block, to_block,
                 self.weth_contract_address,
-                [self.ERC20_TRANSFER_TOPIC, padded_address],
+                [topic1_events, padded_address],
             )
-            logs_to = await self.eth_client.get_logs(
+            logs_transfer_to = await self.eth_client.get_logs(
                 from_block, to_block,
                 self.weth_contract_address,
                 [self.ERC20_TRANSFER_TOPIC, None, padded_address],
             )
 
-            for log in logs_from + logs_to:
+            for log in logs_topic1 + logs_transfer_to:
                 block_numbers.add(int(log['blockNumber'], 16))
 
         return block_numbers

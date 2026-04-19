@@ -325,6 +325,139 @@ class TestNormalizeAddress(unittest.TestCase):
             "0x0000000000deadbeef00112233445566778899aa")
 
 
+# Реальный receipt: успешная транзакция на Monad (block 69211058)
+# https://testnet.monadexplorer.com/tx/0x2d6e6978e9a102bd9748cb928c500fff8d8f882d66ede08a8dc12dd00ee11652
+# Бот оборачивает/разворачивает нативный MON через WMON.deposit() / WMON.withdraw():
+# эти события не эмитят ERC20 Transfer, старая логика их пропускала → tx считалась убытком.
+WMON_CONTRACT = "0x3bd359c1119da7da1d913d1c4d2b7c461115433a"
+MONAD_WATCHED = "0x000000000042963fab83cf5225e7f952191350bb"
+
+MONAD_DEPOSIT_WITHDRAW_RECEIPT = {
+    "status": "0x1",
+    "gasUsed": "0x688b7",
+    "effectiveGasPrice": "0x199c82cc00",
+    "transactionHash": "0x2d6e6978e9a102bd9748cb928c500fff8d8f882d66ede08a8dc12dd00ee11652",
+    "logs": [
+        # Pool sync (не WMON) — должен игнорироваться
+        {
+            "address": "0x188d586ddcf52439676ca21a244753fa19f9ea8e",
+            "topics": [
+                "0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f",
+                "0x39db55f90266305ae94bcd7f750f6f191e300ff8f806dca7d143eaf22a7548da",
+                "0x000000000000000000000000000000000042963fab83cf5225e7f952191350bb",
+            ],
+            "data": "0x00",
+        },
+        # Transfer другого токена TO watched — должен игнорироваться (не WMON)
+        {
+            "address": "0x0e8a4f5c5c6dd44ebeabed5073582ce48be112aa",
+            "topics": [
+                "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+                "0x000000000000000000000000188d586ddcf52439676ca21a244753fa19f9ea8e",
+                "0x000000000000000000000000000000000042963fab83cf5225e7f952191350bb",
+            ],
+            "data": "0x0000000000000000000000000000000000000000000000000000000010924f98",
+        },
+        # Transfer другого токена FROM watched — тоже не WMON, игнор
+        {
+            "address": "0x0e8a4f5c5c6dd44ebeabed5073582ce48be112aa",
+            "topics": [
+                "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+                "0x000000000000000000000000000000000042963fab83cf5225e7f952191350bb",
+                "0x000000000000000000000000188d586ddcf52439676ca21a244753fa19f9ea8e",
+            ],
+            "data": "0x0000000000000000000000000000000000000000000000000000000010924f98",
+        },
+        # WMON Deposit(dst=watched, wad=0x1dd86d1937567255) — incoming
+        {
+            "address": "0x3bd359c1119da7da1d913d1c4d2b7c461115433a",
+            "topics": [
+                "0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c",
+                "0x000000000000000000000000000000000042963fab83cf5225e7f952191350bb",
+            ],
+            "data": "0x0000000000000000000000000000000000000000000000001dd86d1937567255",
+        },
+        # WMON Withdrawal(src=watched, wad=0x1c9f9d48ccc0409b) — outgoing
+        {
+            "address": "0x3bd359c1119da7da1d913d1c4d2b7c461115433a",
+            "topics": [
+                "0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65",
+                "0x000000000000000000000000000000000042963fab83cf5225e7f952191350bb",
+            ],
+            "data": "0x0000000000000000000000000000000000000000000000001c9f9d48ccc0409b",
+        },
+    ],
+}
+
+
+class TestParseReceiptDepositWithdrawal(unittest.TestCase):
+    """Учёт WMON/WETH Deposit + Withdrawal на watched адресе (native wrap/unwrap)"""
+
+    DEPOSIT_AMOUNT = 0x1dd86d1937567255
+    WITHDRAW_AMOUNT = 0x1c9f9d48ccc0409b
+
+    def setUp(self):
+        self.analyzer = TxAnalyzer(eth_client=None,
+                                    weth_contract_address=WMON_CONTRACT,
+                                    watched_address=MONAD_WATCHED)
+        self.result = self.analyzer.parse_receipt(
+            MONAD_DEPOSIT_WITHDRAW_RECEIPT,
+            MONAD_DEPOSIT_WITHDRAW_RECEIPT['transactionHash'])
+
+    def test_deposit_counted_as_incoming(self):
+        self.assertEqual(self.result['incoming_wei'], [self.DEPOSIT_AMOUNT])
+
+    def test_withdrawal_counted_as_outgoing(self):
+        self.assertEqual(self.result['outgoing_wei'], [self.WITHDRAW_AMOUNT])
+
+    def test_transfers_on_other_tokens_ignored(self):
+        """Transfer-события других токенов не учитываются."""
+        self.assertEqual(len(self.result['incoming_wei']), 1)
+        self.assertEqual(len(self.result['outgoing_wei']), 1)
+
+    def test_net_is_profit_after_gas(self):
+        """Реальная транзакция прибыльная: deposit > withdraw + gas."""
+        net = (sum(self.result['incoming_wei'])
+               - sum(self.result['outgoing_wei'])
+               - self.result['gas_fee_wei'])
+        self.assertGreater(net, 0)
+
+
+class TestParseReceiptIgnoresDepositsOfOthers(unittest.TestCase):
+    """Deposit/Withdrawal других адресов на WETH-контракте игнорируются."""
+
+    def test_other_dst_deposit_ignored(self):
+        analyzer = TxAnalyzer(eth_client=None,
+                               weth_contract_address=WMON_CONTRACT,
+                               watched_address=MONAD_WATCHED)
+        receipt = {
+            "status": "0x1",
+            "gasUsed": "0x5208",
+            "effectiveGasPrice": "0x3b9aca00",
+            "logs": [
+                {
+                    "address": WMON_CONTRACT,
+                    "topics": [
+                        "0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c",
+                        "0x0000000000000000000000001111111111111111111111111111111111111111",
+                    ],
+                    "data": "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000",
+                },
+                {
+                    "address": WMON_CONTRACT,
+                    "topics": [
+                        "0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65",
+                        "0x0000000000000000000000002222222222222222222222222222222222222222",
+                    ],
+                    "data": "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000",
+                },
+            ],
+        }
+        result = analyzer.parse_receipt(receipt, "0xfake")
+        self.assertEqual(result['incoming_wei'], [])
+        self.assertEqual(result['outgoing_wei'], [])
+
+
 class TestAnalyzeBlockShortAddress(unittest.TestCase):
     """Тест: адрес без ведущих нулей из RPC должен совпадать"""
 
