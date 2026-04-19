@@ -92,6 +92,19 @@ docker run -d -v ./config.yaml:/app/config.yaml nov1kov/mev-watcher monitor -b e
 docker run -v ./config.yaml:/app/config.yaml nov1kov/mev-watcher analyze -b ethereum -s 18000000
 ```
 
+### Docker Compose
+
+Создайте `docker-compose.yml` рядом с вашим `config.yaml`:
+
+```yaml
+services:
+  mev-watcher:
+    image: nov1kov/mev-watcher
+    restart: unless-stopped
+    volumes:
+      - ./config.yaml:/app/config.yaml
+```
+
 ### Локально
 
 ```bash
