@@ -7,7 +7,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from telegram_notifier import TelegramNotifier, TxEvent, format_report
+from telegram_notifier import TelegramNotifier, TxEvent, BotInfo, format_report
 
 
 class TestFormatReport(unittest.TestCase):
@@ -93,7 +93,7 @@ class TestFormatReport(unittest.TestCase):
             net_wei_change=1_000_000_000_000_000_000,  # +1 ETH
             gas_fee_wei=0,
         )]
-        msg = format_report(events, eth_price_usd=2500.0)
+        msg = format_report(events, prices={"ethereum": 2500.0})
         self.assertIn("+1.000000 ETH", msg)
         self.assertIn("$+2500.00", msg)
 
@@ -177,15 +177,19 @@ class TestTelegramNotifierBatching(unittest.TestCase):
         notifier = TelegramNotifier("token", "chat", notify_schedule="*/30 * * * *")
         notifier._send = AsyncMock()
 
-        bots = {
-            "ethereum": {
-                "watched_address": "0xc0c9c680a96cf92604a94cff927c0ad674450191",
-            },
-            "arbitrum": {
-                "watched_address": "0x0000000000DeAdBeEf00112233445566778899aA",
-            },
-        }
-        asyncio.run(notifier.send_startup_message(bots))
+        notifier.register_bot(BotInfo(
+            name="ethereum",
+            watched_address="0xc0c9c680a96cf92604a94cff927c0ad674450191",
+            token_address="0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+            token_symbol="WETH",
+        ))
+        notifier.register_bot(BotInfo(
+            name="arbitrum",
+            watched_address="0x0000000000DeAdBeEf00112233445566778899aA",
+            token_address="0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
+            token_symbol="WETH",
+        ))
+        asyncio.run(notifier.send_startup_message())
 
         notifier._send.assert_called_once()
         msg = notifier._send.call_args[0][0]
@@ -194,6 +198,30 @@ class TestTelegramNotifierBatching(unittest.TestCase):
         self.assertIn("arbitrum", msg)
         self.assertIn("*/30 * * * *", msg)
         self.assertIn("0xc0c9c680a96cf92604a94cff927c0ad674450191", msg)
+        self.assertIn("WETH", msg)
+
+    def test_startup_message_with_price(self):
+        """Если для бота задан coingecko_id и CoinGecko клиент, в приветствии будет цена"""
+        cg_client = AsyncMock()
+        cg_client.get_prices_usd = AsyncMock(return_value={"ethereum": 3210.5})
+
+        notifier = TelegramNotifier("token", "chat", notify_schedule="0 * * * *",
+                                    cg_client=cg_client)
+        notifier._send = AsyncMock()
+
+        notifier.register_bot(BotInfo(
+            name="ethereum",
+            watched_address="0xc0c9c680a96cf92604a94cff927c0ad674450191",
+            token_address="0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+            token_symbol="WETH",
+            coingecko_id="ethereum",
+        ))
+        asyncio.run(notifier.send_startup_message())
+
+        msg = notifier._send.call_args[0][0]
+        self.assertIn("WETH", msg)
+        self.assertIn("$3,210.50", msg)
+        cg_client.get_prices_usd.assert_awaited_once()
 
     def test_seconds_until_next(self):
         notifier = TelegramNotifier("token", "chat", notify_schedule="* * * * *")

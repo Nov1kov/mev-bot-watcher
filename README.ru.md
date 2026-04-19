@@ -55,15 +55,20 @@ bots:
 
 ## Telegram-уведомления
 
-Сообщение при старте:
+Сообщение при старте (тикер токена берётся по RPC из контракта, цена в USD автоматически резолвится через CoinGecko):
 ```
 🚀 MEV Monitor Started
 
-• ethereum
+• ethereum (WETH — $3,210.50)
+  0xYOUR_BOT_ADDRESS
+
+• monad (WMON — $0.03)
   0xYOUR_BOT_ADDRESS
 
 ⏰ Schedule: 0 * * * *
 ```
+
+Если токен не удалось найти в CoinGecko, USD-часть скрывается и в сообщении остаётся только тикер (например, `• monad (WMON)`).
 
 Периодический отчёт:
 ```

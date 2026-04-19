@@ -3,10 +3,12 @@ import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Iterable
 
 import aiohttp
 from croniter import croniter
+
+from coingecko_client import CoinGeckoClient
 
 
 @dataclass
@@ -22,18 +24,63 @@ class TxEvent:
     timestamp: float = field(default_factory=time.time)
 
 
+@dataclass
+class BotInfo:
+    """Информация о боте, используемая для форматирования уведомлений"""
+    name: str
+    watched_address: str
+    token_address: str
+    token_symbol: str = "ETH"
+    coingecko_id: Optional[str] = None
+
+    @classmethod
+    async def from_rpc(cls, eth_client, cg_client, name: str,
+                       watched_address: str, token_address: str) -> "BotInfo":
+        """Собирает BotInfo: тикер — по RPC из контракта, coingecko_id —
+        автоподбором через CoinGecko."""
+        token_symbol = "ETH"
+        try:
+            token_symbol = await eth_client.get_token_symbol(token_address)
+        except Exception:
+            logging.exception(f"[{name}] failed to fetch token symbol, fallback to 'ETH'")
+
+        coingecko_id: Optional[str] = None
+        try:
+            coingecko_id = await cg_client.resolve_id_by_symbol(token_symbol)
+        except Exception:
+            logging.exception(f"[{name}] failed to resolve coingecko_id")
+
+        if coingecko_id:
+            logging.info(f"[{name}] token {token_symbol} -> coingecko_id {coingecko_id}")
+        else:
+            logging.warning(f"[{name}] token {token_symbol}: no coingecko match, USD price will be hidden")
+
+        return cls(
+            name=name,
+            watched_address=watched_address,
+            token_address=token_address,
+            token_symbol=token_symbol,
+            coingecko_id=coingecko_id,
+        )
+
+
 class TelegramNotifier:
     """Агрегированные уведомления в Telegram с контролем частоты отправки"""
 
     def __init__(self, bot_token: str, chat_id: str, notify_schedule: str = "0 * * * *",
-                 eth_client=None):
+                 cg_client: Optional[CoinGeckoClient] = None):
         self.bot_token = bot_token
         self.chat_id = chat_id
         self.notify_schedule = notify_schedule
-        self.eth_client = eth_client
+        self.cg_client = cg_client
         self._pending: List[TxEvent] = []
         self._last_sent: float = 0.0
         self._lock = asyncio.Lock()
+        self.bots: Dict[str, BotInfo] = {}
+
+    def register_bot(self, info: BotInfo):
+        """Регистрация бота в нотификаторе"""
+        self.bots[info.name] = info
 
     def _seconds_until_next(self) -> float:
         cron = croniter(self.notify_schedule, datetime.now())
@@ -52,19 +99,32 @@ class TelegramNotifier:
         async with self._lock:
             await self._flush()
 
+    async def _fetch_prices(self, bot_names: Iterable[str]) -> Dict[str, float]:
+        """Загружает USD-цены для заданных ботов одним batch-запросом к CoinGecko."""
+        if not self.cg_client:
+            return {}
+        name_to_id = {
+            name: self.bots[name].coingecko_id
+            for name in bot_names
+            if name in self.bots and self.bots[name].coingecko_id
+        }
+        if not name_to_id:
+            return {}
+        try:
+            prices_by_id = await self.cg_client.get_prices_usd(name_to_id.values())
+        except Exception:
+            logging.exception("Failed to fetch prices from CoinGecko")
+            return {}
+        return {name: prices_by_id[cid] for name, cid in name_to_id.items() if cid in prices_by_id}
+
     async def _flush(self):
         if not self._pending:
             return
         events = self._pending.copy()
         self._pending.clear()
         self._last_sent = time.time()
-        eth_price = None
-        if self.eth_client:
-            try:
-                eth_price = await self.eth_client.get_eth_price_usd()
-            except Exception:
-                logging.exception("Failed to fetch ETH price")
-        message = format_report(events, eth_price_usd=eth_price)
+        prices = await self._fetch_prices({e.bot_name for e in events})
+        message = format_report(events, bots_info=self.bots, prices=prices)
         await self._send(message)
 
     async def _send(self, text: str):
@@ -85,13 +145,15 @@ class TelegramNotifier:
         except Exception:
             logging.exception("Failed to send Telegram notification")
 
-    async def send_startup_message(self, bots: Dict[str, Dict]):
+    async def send_startup_message(self):
         """Отправить приветственное сообщение при запуске мониторинга"""
         lines = ["\U0001f680 *MEV Monitor Started*", ""]
-        for name, cfg in bots.items():
-            addr = cfg.get('watched_address', '')
-            lines.append(f"\u2022 *{name}*")
-            lines.append(f"  `{addr}`")
+        prices = await self._fetch_prices(self.bots.keys())
+        for name, info in self.bots.items():
+            price = prices.get(name)
+            price_str = f" \u2014 ${price:,.2f}" if price else ""
+            lines.append(f"\u2022 *{name}* ({info.token_symbol}{price_str})")
+            lines.append(f"  `{info.watched_address}`")
         lines.append("")
         lines.append(f"\u23f0 Schedule: `{self.notify_schedule}`")
         await self._send("\n".join(lines))
@@ -104,8 +166,14 @@ class TelegramNotifier:
             await self.force_flush()
 
 
-def format_report(events: List[TxEvent], eth_price_usd: Optional[float] = None) -> str:
-    """Форматирование отчёта для Telegram"""
+def format_report(events: List[TxEvent],
+                  bots_info: Optional[Dict[str, BotInfo]] = None,
+                  prices: Optional[Dict[str, float]] = None) -> str:
+    """Форматирование отчёта для Telegram.
+
+    bots_info — словарь BotInfo по bot_name, задаёт символ токена.
+    prices    — словарь USD-цен по bot_name.
+    """
     by_bot: Dict[str, List[TxEvent]] = {}
     for e in events:
         by_bot.setdefault(e.bot_name, []).append(e)
@@ -113,6 +181,10 @@ def format_report(events: List[TxEvent], eth_price_usd: Optional[float] = None) 
     lines = []
 
     for bot_name, bot_events in by_bot.items():
+        info = bots_info.get(bot_name) if bots_info else None
+        symbol = info.token_symbol if info else "ETH"
+        price = prices.get(bot_name) if prices else None
+
         total_net = sum(e.net_wei_change for e in bot_events)
         total_txs = sum(e.tx_count for e in bot_events)
         total_fails = sum(e.fail_count for e in bot_events)
@@ -132,9 +204,9 @@ def format_report(events: List[TxEvent], eth_price_usd: Optional[float] = None) 
         lines.append(f"{emoji} *{bot_name.upper()}*")
         lines.append(f"`{short_addr}`")
         lines.append(f"\u251c Successful txs: {successful}/{total_txs}")
-        total_line = f"\u2514 Total: `{net_eth:+.6f} ETH"
-        if eth_price_usd:
-            usd_value = net_eth * eth_price_usd
+        total_line = f"\u2514 Total: `{net_eth:+.6f} {symbol}"
+        if price:
+            usd_value = net_eth * price
             total_line += f" (${usd_value:+.2f})"
         total_line += "`"
         lines.append(total_line)

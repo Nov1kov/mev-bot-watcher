@@ -6,7 +6,9 @@ from typing import Dict, Optional
 
 from tx_watcher import TxWatcher
 from eth_client import EthClient
+from coingecko_client import CoinGeckoClient
 from log_progress import setup_logging
+from telegram_notifier import BotInfo
 from tx_analyzer import TxAnalyzer
 from ws_connector import WsConnectorRaw
 
@@ -79,10 +81,15 @@ def analyze(config: str, bot_name: str, start_block: int):
     
     # Запускаем анализ
     async def run_analysis():
-        async with EthClient(http_rpc_url) as eth_client:
-            analyzer = TxAnalyzer(eth_client, weth_contract, watched_address)
+        async with EthClient(http_rpc_url) as eth_client, CoinGeckoClient() as cg_client:
+            bot_info = await BotInfo.from_rpc(
+                eth_client, cg_client, bot_name, watched_address, weth_contract)
+            analyzer = TxAnalyzer(eth_client, weth_contract, watched_address,
+                                  cg_client=cg_client,
+                                  coingecko_id=bot_info.coingecko_id,
+                                  token_symbol=bot_info.token_symbol)
             await analyzer.analyze_from_block(start_block)
-    
+
     asyncio.run(run_analysis())
 
 
@@ -112,6 +119,9 @@ def monitor(config: str, bot_name: Optional[str] = None):
     telegram_config = full_config.get('telegram')
 
     async def run_monitoring():
+        cg_client = CoinGeckoClient()
+        await cg_client.__aenter__()
+
         # Настройка Telegram уведомлений
         notifier = None
         if telegram_config and telegram_config.get('bot_token'):
@@ -121,6 +131,7 @@ def monitor(config: str, bot_name: Optional[str] = None):
                 bot_token=telegram_config['bot_token'],
                 chat_id=str(telegram_config['chat_id']),
                 notify_schedule=schedule,
+                cg_client=cg_client,
             )
             logging.info(f"Telegram notifications enabled (schedule: {schedule})")
 
@@ -144,18 +155,21 @@ def monitor(config: str, bot_name: Optional[str] = None):
             await eth_client.__aenter__()
             eth_clients.append(eth_client)
 
+            bot_info = await BotInfo.from_rpc(
+                eth_client, cg_client, name, watched_address, weth_contract)
+
+            if notifier:
+                notifier.register_bot(bot_info)
+
             watcher = TxWatcher(eth_client, weth_contract, watched_address,
                                 bot_name=name, notifier=notifier)
             await watcher.subscribe(ws)
             tasks.append(ws.run())
 
-            if notifier and not notifier.eth_client:
-                notifier.eth_client = eth_client
-
         if notifier:
             async def send_startup_after_connect():
                 await asyncio.gather(*(ws.ready.wait() for ws in ws_connectors))
-                await notifier.send_startup_message(bots_to_monitor)
+                await notifier.send_startup_message()
 
             tasks.append(send_startup_after_connect())
             tasks.append(notifier.run_periodic_flush())
@@ -167,6 +181,7 @@ def monitor(config: str, bot_name: Optional[str] = None):
                 await notifier.force_flush()
             for client in eth_clients:
                 await client.__aexit__(None, None, None)
+            await cg_client.__aexit__(None, None, None)
 
     asyncio.run(run_monitoring())
 

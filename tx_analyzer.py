@@ -3,6 +3,7 @@ from typing import Dict, Optional, Union, List
 
 from log_progress import print_progress
 from eth_client import EthClient
+from coingecko_client import CoinGeckoClient
 
 ERC20_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 
@@ -27,11 +28,17 @@ def normalize_address(addr: str) -> str:
 class TxAnalyzer:
     """Класс для анализа транзакций"""
 
-    def __init__(self, eth_client: EthClient, weth_contract_address: str, watched_address: str):
+    def __init__(self, eth_client: EthClient, weth_contract_address: str, watched_address: str,
+                 cg_client: Optional[CoinGeckoClient] = None,
+                 coingecko_id: Optional[str] = None,
+                 token_symbol: str = "ETH"):
         self.eth_client = eth_client
         self.weth_contract_address = normalize_address(weth_contract_address)
         self.watched_address = normalize_address(watched_address)
         self.ERC20_TRANSFER_TOPIC = ERC20_TRANSFER_TOPIC
+        self.cg_client = cg_client
+        self.coingecko_id = coingecko_id
+        self.token_symbol = token_symbol
 
     def parse_receipt(self, receipt: Dict, tx_hash: str) -> Dict:
         """Разбор receipt транзакции: gas, статус, входящие/исходящие трансферы"""
@@ -164,7 +171,13 @@ class TxAnalyzer:
                 logging_color('-' * 50)
                 summary_profit += block_summary['net_wei_change']
 
-        eth_price = await self.eth_client.get_eth_price_usd()
-        profit_eth = summary_profit / 1e18
-        profit_usd = profit_eth * eth_price
-        logging.info(f"Total profit: {self.prettify_weth(summary_profit)} WETH (${profit_usd:.2f} @ ETH=${eth_price:.0f})")
+        profit_tokens = summary_profit / 1e18
+        usd_suffix = ""
+        if self.cg_client and self.coingecko_id:
+            try:
+                price = await self.cg_client.get_price_usd(self.coingecko_id)
+                if price is not None:
+                    usd_suffix = f" (${profit_tokens * price:.2f} @ {self.token_symbol}=${price:.2f})"
+            except Exception:
+                logging.exception("Failed to fetch token price for analyze summary")
+        logging.info(f"Total profit: {self.prettify_weth(summary_profit)} {self.token_symbol}{usd_suffix}")

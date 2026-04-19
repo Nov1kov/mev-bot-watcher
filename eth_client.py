@@ -3,6 +3,24 @@ from typing import Optional, List, Any, Dict
 import aiohttp
 
 
+def _decode_abi_string(hex_result: str) -> str:
+    """Декодирование строки из результата eth_call.
+
+    Поддерживает стандартные ABI dynamic string (offset+length+data),
+    а также контракты со старым ABI, возвращающие bytes32 (как MKR).
+    """
+    if hex_result.startswith('0x'):
+        hex_result = hex_result[2:]
+    if not hex_result:
+        return ''
+    # bytes32 fallback: длина данных ≤ 64 hex (32 байта)
+    if len(hex_result) < 128:
+        return bytes.fromhex(hex_result).rstrip(b'\x00').decode('utf-8', errors='replace')
+    length = int(hex_result[64:128], 16)
+    data = hex_result[128:128 + length * 2]
+    return bytes.fromhex(data).decode('utf-8', errors='replace')
+
+
 class EthClient:
     """Класс для работы с Ethereum JSON-RPC API"""
 
@@ -60,12 +78,11 @@ class EthClient:
         }
         return await self.eth_call('eth_getLogs', [params])
 
-    async def get_eth_price_usd(self) -> float:
-        """Получение текущей цены ETH в USD через CoinGecko"""
-        url = "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd"
-        async with self.session.get(url) as response:
-            data = await response.json()
-            return data['ethereum']['usd']
+    async def get_token_symbol(self, address: str) -> str:
+        """Получение символа ERC20 токена через RPC вызов symbol()"""
+        # function selector: keccak256("symbol()")[:4] = 0x95d89b41
+        result = await self.eth_call('eth_call', [{'to': address, 'data': '0x95d89b41'}, 'latest'])
+        return _decode_abi_string(result)
 
     async def eth_getBlockReceipts(self, block_number: int | str) -> Dict:
         """Функция для получения receipt о блоке"""
