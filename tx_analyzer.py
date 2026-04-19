@@ -144,6 +144,30 @@ class TxAnalyzer:
 
         return block_numbers
 
+    def _log_block_summary(self, block_summary: Dict) -> None:
+        log_fn = (logging.warning if block_summary['has_fails']
+                  else logging.info if block_summary['net_wei_change'] > 0
+                  else logging.error)
+        log_fn(f"Block Number: {block_summary['block_number']}")
+        log_fn(f"    Transaction Hash:{block_summary['txs']}")
+        log_fn(f"    Incoming WETH: {block_summary['incoming_weth']} WETH")
+        log_fn(f"    Outgoing WETH: {block_summary['outgoing_weth']} WETH")
+        log_fn(f"    Gas Fee: {block_summary['gas_fee_eth']} ETH")
+        log_fn(f"    Net WETH Change: {block_summary['net_weth_change']} WETH")
+        log_fn('-' * 50)
+
+    async def _log_total_profit(self, summary_profit_wei: int) -> None:
+        profit_tokens = summary_profit_wei / 1e18
+        usd_suffix = ""
+        if self.cg_client and self.coingecko_id:
+            try:
+                price = await self.cg_client.get_price_usd(self.coingecko_id)
+                if price is not None:
+                    usd_suffix = f" (${profit_tokens * price:.2f} @ {self.token_symbol}=${price:.2f})"
+            except Exception:
+                logging.exception("Failed to fetch token price for analyze summary")
+        logging.info(f"Total profit: {self.prettify_weth(summary_profit_wei)} {self.token_symbol}{usd_suffix}")
+
     async def analyze_from_block(self, start_block_number: int):
         """Функция для анализа блоков начиная с указанного"""
         latest_block = await self.eth_client.get_latest_block()
@@ -160,24 +184,19 @@ class TxAnalyzer:
             block_summary = await self.analyze_block(block)
 
             if block_summary:
-                logging_color = logging.warning if block_summary['has_fails'] else logging.info if block_summary[
-                                                                                                       'net_wei_change'] > 0 else logging.error
-                logging_color(f"Block Number: {block_summary['block_number']}")
-                logging_color(f"    Transaction Hash:{block_summary['txs']}")
-                logging_color(f"    Incoming WETH: {block_summary['incoming_weth']} WETH")
-                logging_color(f"    Outgoing WETH: {block_summary['outgoing_weth']} WETH")
-                logging_color(f"    Gas Fee: {block_summary['gas_fee_eth']} ETH")
-                logging_color(f"    Net WETH Change: {block_summary['net_weth_change']} WETH")
-                logging_color('-' * 50)
+                self._log_block_summary(block_summary)
                 summary_profit += block_summary['net_wei_change']
 
-        profit_tokens = summary_profit / 1e18
-        usd_suffix = ""
-        if self.cg_client and self.coingecko_id:
-            try:
-                price = await self.cg_client.get_price_usd(self.coingecko_id)
-                if price is not None:
-                    usd_suffix = f" (${profit_tokens * price:.2f} @ {self.token_symbol}=${price:.2f})"
-            except Exception:
-                logging.exception("Failed to fetch token price for analyze summary")
-        logging.info(f"Total profit: {self.prettify_weth(summary_profit)} {self.token_symbol}{usd_suffix}")
+        await self._log_total_profit(summary_profit)
+
+    async def analyze_single_block(self, block_number: int):
+        """Отладочный прогон одного блока через analyze_block"""
+        block = await self.eth_client.get_block_with_transactions(block_number)
+        block_summary = await self.analyze_block(block)
+
+        if block_summary is None:
+            logging.info(f"Block {block_number}: no relevant transactions")
+            return
+
+        self._log_block_summary(block_summary)
+        await self._log_total_profit(block_summary['net_wei_change'])

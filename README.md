@@ -87,16 +87,6 @@ Monitor all bots:
 docker run -d -v ./config.yaml:/app/config.yaml nov1kov/mev-watcher
 ```
 
-Monitor a specific bot:
-```bash
-docker run -d -v ./config.yaml:/app/config.yaml nov1kov/mev-watcher monitor -b ethereum
-```
-
-Analyze blocks:
-```bash
-docker run -v ./config.yaml:/app/config.yaml nov1kov/mev-watcher analyze -b ethereum -s 18000000
-```
-
 ### Docker Compose
 
 Create `docker-compose.yml` next to your `config.yaml`:
@@ -116,6 +106,25 @@ services:
 pip install -r requirements.txt
 python main.py monitor
 python main.py analyze -b ethereum -s 18000000
+```
+
+## Commands
+
+`monitor` — subscribe to new blocks via WebSocket:
+- `-b, --bot-name <name>` — specific bot (optional; all bots if omitted)
+
+`analyze` — retrospective analysis. Exactly one of the block options is required:
+- `-b, --bot-name <name>` — bot to analyze (required)
+- `-s, --start-block <N>` — scan from block N to the latest
+- `-n, --block <N>` — prefetch and analyze a single block (debug mode)
+
+`-c, --config <path>` — path to config (default `config.yaml`) for both commands.
+
+Examples:
+```bash
+python main.py monitor -b ethereum
+python main.py analyze -b ethereum -s 18000000
+python main.py analyze -b ethereum -n 18500000
 ```
 
 ## Tests

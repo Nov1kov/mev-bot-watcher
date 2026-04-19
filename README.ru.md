@@ -87,16 +87,6 @@ bots:
 docker run -d -v ./config.yaml:/app/config.yaml nov1kov/mev-watcher
 ```
 
-Мониторинг конкретного бота:
-```bash
-docker run -d -v ./config.yaml:/app/config.yaml nov1kov/mev-watcher monitor -b ethereum
-```
-
-Анализ блоков:
-```bash
-docker run -v ./config.yaml:/app/config.yaml nov1kov/mev-watcher analyze -b ethereum -s 18000000
-```
-
 ### Docker Compose
 
 Создайте `docker-compose.yml` рядом с вашим `config.yaml`:
@@ -116,6 +106,25 @@ services:
 pip install -r requirements.txt
 python main.py monitor
 python main.py analyze -b ethereum -s 18000000
+```
+
+## Команды
+
+`monitor` — подписка на новые блоки через WebSocket:
+- `-b, --bot-name <name>` — конкретный бот (опционально; без флага мониторятся все)
+
+`analyze` — ретроспективный анализ. Нужно указать ровно одну из опций по блокам:
+- `-b, --bot-name <name>` — имя бота (обязательно)
+- `-s, --start-block <N>` — скан от блока N до последнего
+- `-n, --block <N>` — прогон одиночного блока (режим отладки)
+
+`-c, --config <path>` — путь к конфигу (по умолчанию `config.yaml`) для обеих команд.
+
+Примеры:
+```bash
+python main.py monitor -b ethereum
+python main.py analyze -b ethereum -s 18000000
+python main.py analyze -b ethereum -n 18500000
 ```
 
 ## Тесты
