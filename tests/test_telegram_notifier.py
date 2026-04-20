@@ -200,6 +200,54 @@ class TestTelegramNotifierBatching(unittest.TestCase):
         self.assertIn("0xc0c9c680a96cf92604a94cff927c0ad674450191", msg)
         self.assertIn("WETH", msg)
 
+    def test_startup_message_with_balance(self):
+        """Выводит суммарный баланс (native + wrapped) в нативном тикере"""
+        notifier = TelegramNotifier("token", "chat", notify_schedule="0 * * * *")
+        notifier._send = AsyncMock()
+
+        notifier.register_bot(BotInfo(
+            name="ethereum",
+            watched_address="0xc0c9c680a96cf92604a94cff927c0ad674450191",
+            token_address="0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+            token_symbol="WETH",
+            total_balance_wei=1_234_500_000_000_000_000,  # 1.2345 ETH
+        ))
+        asyncio.run(notifier.send_startup_message())
+
+        msg = notifier._send.call_args[0][0]
+        self.assertIn("1.2345 ETH", msg)
+        self.assertIn("Balance", msg)
+        # Без цены USD-части быть не должно
+        self.assertNotIn("$", msg.split("Balance")[1].split("\n")[0])
+
+    def test_startup_message_balance_with_usd(self):
+        """Если есть coingecko_id и cg_client, рядом с балансом показывается USD"""
+        cg_client = AsyncMock()
+        cg_client.get_prices_usd = AsyncMock(return_value={"ethereum": 2000.0})
+
+        notifier = TelegramNotifier("token", "chat", notify_schedule="0 * * * *",
+                                    cg_client=cg_client)
+        notifier._send = AsyncMock()
+        notifier.register_bot(BotInfo(
+            name="ethereum",
+            watched_address="0xc0c9c680a96cf92604a94cff927c0ad674450191",
+            token_address="0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+            token_symbol="WETH",
+            coingecko_id="ethereum",
+            total_balance_wei=1_500_000_000_000_000_000,  # 1.5 ETH
+        ))
+        asyncio.run(notifier.send_startup_message())
+
+        msg = notifier._send.call_args[0][0]
+        self.assertIn("1.5000 ETH", msg)
+        self.assertIn("$3,000.00", msg)
+
+    def test_native_symbol_strips_w_prefix(self):
+        self.assertEqual(BotInfo("b", "a", "t", token_symbol="WETH").native_symbol, "ETH")
+        self.assertEqual(BotInfo("b", "a", "t", token_symbol="WMON").native_symbol, "MON")
+        self.assertEqual(BotInfo("b", "a", "t", token_symbol="ETH").native_symbol, "ETH")
+        self.assertEqual(BotInfo("b", "a", "t", token_symbol="W").native_symbol, "W")
+
     def test_startup_message_with_price(self):
         """Если для бота задан coingecko_id и CoinGecko клиент, в приветствии будет цена"""
         cg_client = AsyncMock()

@@ -32,12 +32,21 @@ class BotInfo:
     token_address: str
     token_symbol: str = "ETH"
     coingecko_id: Optional[str] = None
+    total_balance_wei: Optional[int] = None
+
+    @property
+    def native_symbol(self) -> str:
+        """Тикер нативного токена: WETH -> ETH, WMON -> MON и т.д."""
+        s = self.token_symbol
+        if len(s) > 1 and s[0].upper() == "W":
+            return s[1:]
+        return s
 
     @classmethod
     async def from_rpc(cls, eth_client, cg_client, name: str,
                        watched_address: str, token_address: str) -> "BotInfo":
-        """Собирает BotInfo: тикер — по RPC из контракта, coingecko_id —
-        автоподбором через CoinGecko."""
+        """Собирает BotInfo: тикер и суммарный баланс (native + wrapped ERC20)
+        — по RPC, coingecko_id — автоподбором через CoinGecko."""
         token_symbol = "ETH"
         try:
             token_symbol = await eth_client.get_token_symbol(token_address)
@@ -50,6 +59,14 @@ class BotInfo:
         except Exception:
             logging.exception(f"[{name}] failed to resolve coingecko_id")
 
+        total_balance_wei: Optional[int] = None
+        try:
+            native = await eth_client.get_balance(watched_address)
+            wrapped = await eth_client.get_erc20_balance(token_address, watched_address)
+            total_balance_wei = native + wrapped
+        except Exception:
+            logging.exception(f"[{name}] failed to fetch balance")
+
         if coingecko_id:
             logging.info(f"[{name}] token {token_symbol} -> coingecko_id {coingecko_id}")
         else:
@@ -61,6 +78,7 @@ class BotInfo:
             token_address=token_address,
             token_symbol=token_symbol,
             coingecko_id=coingecko_id,
+            total_balance_wei=total_balance_wei,
         )
 
 
@@ -154,6 +172,13 @@ class TelegramNotifier:
             price_str = f" \u2014 ${price:,.2f}" if price else ""
             lines.append(f"\u2022 *{name}* ({info.token_symbol}{price_str})")
             lines.append(f"  `{info.watched_address}`")
+            if info.total_balance_wei is not None:
+                balance = info.total_balance_wei / 1e18
+                balance_line = f"  \U0001f4b0 Balance: `{balance:.4f} {info.native_symbol}"
+                if price:
+                    balance_line += f" (${balance * price:,.2f})"
+                balance_line += "`"
+                lines.append(balance_line)
         lines.append("")
         lines.append(f"\u23f0 Schedule: `{self.notify_schedule}`")
         await self._send("\n".join(lines))

@@ -52,6 +52,21 @@ class EthClient:
         block_number = await self.eth_call('eth_blockNumber')
         return int(block_number, 16)
 
+    async def get_balance(self, address: str) -> int:
+        """Нативный баланс адреса в wei через eth_getBalance"""
+        result = await self.eth_call('eth_getBalance', [address, 'latest'])
+        return int(result, 16)
+
+    async def get_erc20_balance(self, token_address: str, holder_address: str) -> int:
+        """Баланс ERC20 токена на адресе через вызов balanceOf(address)"""
+        # function selector: keccak256("balanceOf(address)")[:4] = 0x70a08231
+        padded = holder_address.lower().removeprefix('0x').zfill(64)
+        data = '0x70a08231' + padded
+        result = await self.eth_call('eth_call', [{'to': token_address, 'data': data}, 'latest'])
+        if not result or result == '0x':
+            return 0
+        return int(result, 16)
+
     async def get_block_with_transactions(self, block_number: int | str) -> Dict:
         """Функция для получения блока с полными транзакциями"""
         block = await self.eth_call('eth_getBlockByNumber',

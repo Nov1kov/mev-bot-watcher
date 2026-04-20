@@ -55,15 +55,17 @@ bots:
 
 ## Telegram-уведомления
 
-Сообщение при старте (тикер токена берётся по RPC из контракта, цена в USD автоматически резолвится через CoinGecko):
+Сообщение при старте. Тикер и баланс берутся по RPC (символ + нативный `eth_getBalance` + wrapped ERC20 `balanceOf`, суммируются); цена в USD автоматически резолвится через CoinGecko:
 ```
 🚀 MEV Monitor Started
 
 • ethereum (WETH — $3,210.50)
   0xYOUR_BOT_ADDRESS
+  💰 Balance: 1.5000 ETH ($4,815.75)
 
 • monad (WMON — $0.03)
   0xYOUR_BOT_ADDRESS
+  💰 Balance: 42.0000 MON ($1.29)
 
 ⏰ Schedule: 0 * * * *
 ```
