@@ -102,6 +102,19 @@ class TestFormatReport(unittest.TestCase):
         msg = format_report(events)
         self.assertNotIn("$", msg)
 
+    def test_alphabetical_order(self):
+        events = [
+            TxEvent("z_bot", "0x1", 100, 1, 0, 1000, 100),
+            TxEvent("a_bot", "0x2", 100, 1, 0, 1000, 100),
+            TxEvent("m_bot", "0x3", 100, 1, 0, 1000, 100),
+        ]
+        msg = format_report(events)
+        # Check order of appearances
+        pos_a = msg.find("A_BOT")
+        pos_m = msg.find("M_BOT")
+        pos_z = msg.find("Z_BOT")
+        self.assertTrue(pos_a < pos_m < pos_z, f"Order is wrong: A:{pos_a}, M:{pos_m}, Z:{pos_z}")
+
 
 class TestTelegramNotifierBatching(unittest.TestCase):
     """Тесты логики батчинга уведомлений"""
@@ -270,6 +283,26 @@ class TestTelegramNotifierBatching(unittest.TestCase):
         self.assertIn("WETH", msg)
         self.assertIn("$3,210.50", msg)
         cg_client.get_prices_usd.assert_awaited_once()
+
+    def test_startup_message_alphabetical_order(self):
+        notifier = TelegramNotifier("token", "chat", notify_schedule="0 * * * *")
+        notifier._send = AsyncMock()
+
+        names = ["z_bot", "a_bot", "m_bot"]
+        for name in names:
+            notifier.register_bot(BotInfo(
+                name=name,
+                watched_address="0x1",
+                token_address="0x2",
+                token_symbol="ETH",
+            ))
+
+        asyncio.run(notifier.send_startup_message())
+        msg = notifier._send.call_args[0][0]
+        pos_a = msg.find("*a_bot*")
+        pos_m = msg.find("*m_bot*")
+        pos_z = msg.find("*z_bot*")
+        self.assertTrue(pos_a < pos_m < pos_z, f"Order is wrong in startup: A:{pos_a}, M:{pos_m}, Z:{pos_z}")
 
     def test_seconds_until_next(self):
         notifier = TelegramNotifier("token", "chat", notify_schedule="* * * * *")

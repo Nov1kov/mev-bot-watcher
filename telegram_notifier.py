@@ -167,7 +167,8 @@ class TelegramNotifier:
         """Отправить приветственное сообщение при запуске мониторинга"""
         lines = ["\U0001f680 *MEV Monitor Started*", ""]
         prices = await self._fetch_prices(self.bots.keys())
-        for name, info in self.bots.items():
+        for name in sorted(self.bots.keys()):
+            info = self.bots[name]
             price = prices.get(name)
             price_str = f" \u2014 ${price:,.2f}" if price else ""
             lines.append(f"\u2022 *{name}* ({info.token_symbol}{price_str})")
@@ -205,7 +206,8 @@ def format_report(events: List[TxEvent],
 
     lines = []
 
-    for bot_name, bot_events in by_bot.items():
+    for bot_name in sorted(by_bot.keys()):
+        bot_events = by_bot[bot_name]
         info = bots_info.get(bot_name) if bots_info else None
         symbol = info.token_symbol if info else "ETH"
         price = prices.get(bot_name) if prices else None
