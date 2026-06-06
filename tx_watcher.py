@@ -1,20 +1,20 @@
 import logging
-from typing import Optional
+from typing import List, Optional
 
 from eth_client import EthClient
-from tx_analyzer import TxAnalyzer, normalize_address
+from tx_analyzer import TxAnalyzer, TokenInfo, normalize_address
 from telegram_notifier import TelegramNotifier, TxEvent
 
 
 class TxWatcher:
-    def __init__(self, eth_client: EthClient, weth_contract_address: str, watched_address: str,
+    def __init__(self, eth_client: EthClient, tokens: List[TokenInfo], watched_address: str,
                  bot_name: str = "", notifier: Optional[TelegramNotifier] = None):
         self.eth_client = eth_client
-        self.weth_contract_address = normalize_address(weth_contract_address)
+        self.tokens = tokens
         self.watched_address = normalize_address(watched_address)
         self.bot_name = bot_name
         self.notifier = notifier
-        self.analyzer = TxAnalyzer(eth_client, weth_contract_address, watched_address)
+        self.analyzer = TxAnalyzer(eth_client, tokens, watched_address)
 
     async def subscribe(self, ws_connector):
         await ws_connector.subscribe(self.handle_event, subscription_type="newHeads")
@@ -28,11 +28,14 @@ class TxWatcher:
         if not block_summary:
             return
 
-        log_fn = (logging.warning if block_summary['has_fails']
-                  else logging.info if block_summary['net_wei_change'] > 0
-                  else logging.error)
-        log_fn(f"[{self.bot_name}] Block {block_summary['block_number']}: "
-               f"Net {block_summary['net_weth_change']} WETH")
+        log_fn = logging.warning if block_summary['has_fails'] else logging.info
+        net_parts = [
+            f"{t.symbol} {self.analyzer.prettify(block_summary['net_by_token'].get(t.address, 0), t.decimals)}"
+            for t in self.tokens
+            if block_summary['net_by_token'].get(t.address, 0) != 0
+        ]
+        net_str = ", ".join(net_parts) if net_parts else "no token change"
+        log_fn(f"[{self.bot_name}] Block {block_summary['block_number']}: {net_str}")
 
         if self.notifier:
             await self.notifier.add_event(TxEvent(
@@ -41,6 +44,6 @@ class TxWatcher:
                 block_number=block_summary['block_number'],
                 tx_count=block_summary['tx_count'],
                 fail_count=block_summary['fail_count'],
-                net_wei_change=block_summary['net_wei_change'],
+                net_by_token=block_summary['net_by_token'],
                 gas_fee_wei=block_summary['total_gas_wei'],
             ))

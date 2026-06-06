@@ -2,14 +2,14 @@ import logging
 import asyncio
 import yaml
 import click
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from tx_watcher import TxWatcher
 from eth_client import EthClient
 from coingecko_client import CoinGeckoClient
 from log_progress import setup_logging
 from telegram_notifier import BotInfo
-from tx_analyzer import TxAnalyzer
+from tx_analyzer import TxAnalyzer, TokenInfo
 from ws_connector import WsConnectorRaw
 
 
@@ -17,7 +17,7 @@ def load_config(config_path: str) -> Dict:
     """Загрузка конфигурации из YAML файла"""
     with open(config_path, 'r') as file:
         return yaml.safe_load(file)
-    
+
 
 def get_bot_config_by_name(config: Dict, bot_name: str) -> Optional[Dict]:
     """Получение конфигурации бота по имени"""
@@ -29,6 +29,22 @@ def get_bot_config_by_name(config: Dict, bot_name: str) -> Optional[Dict]:
             return bot_config
 
     return None
+
+
+def get_token_addresses(bot_config: Dict) -> tuple:
+    """Возвращает (wrapped_token, [base_tokens]) из конфигурации бота."""
+    wrapped = bot_config['wrapped_token'].lower()
+    base = [a.lower() for a in (bot_config.get('base_tokens') or [])]
+    return wrapped, base
+
+
+async def build_tokens(eth_client: EthClient, cg_client: CoinGeckoClient,
+                       wrapped: str, base: List[str]) -> List[TokenInfo]:
+    """Собирает список TokenInfo: wrapped (is_wrapped=True) + base_tokens."""
+    tokens = [await TokenInfo.from_rpc(eth_client, cg_client, wrapped, is_wrapped=True)]
+    for addr in base:
+        tokens.append(await TokenInfo.from_rpc(eth_client, cg_client, addr, is_wrapped=False))
+    return tokens
 
 
 def parse_ws_rpc(ws_rpc) -> tuple:
@@ -47,7 +63,7 @@ def parse_ws_rpc(ws_rpc) -> tuple:
 
 @click.group()
 def cli():
-    """Утилита для анализа и мониторинга Ethereum транзакций WETH"""
+    """Утилита для анализа и мониторинга Ethereum транзакций"""
     setup_logging()
 
 
@@ -74,12 +90,13 @@ def analyze(config: str, bot_name: str, start_block: Optional[int], block: Optio
         return
 
     # Извлекаем настройки для указанного бота
-    weth_contract = bot_config['token_contract_address'].lower()
+    wrapped, base = get_token_addresses(bot_config)
     watched_address = bot_config['watched_address'].lower()
     http_rpc_url = bot_config['http_rpc_url']
 
     logging.info(f"Starting analysis for bot '{bot_name}':")
-    logging.info(f"Token contract: {weth_contract}")
+    logging.info(f"Wrapped token: {wrapped}")
+    logging.info(f"Base tokens: {base}")
     logging.info(f"Watched address: {watched_address}")
     if start_block is not None:
         logging.info(f"Starting from block: {start_block}")
@@ -89,19 +106,17 @@ def analyze(config: str, bot_name: str, start_block: Optional[int], block: Optio
     # Запускаем анализ
     async def run_analysis():
         async with EthClient(http_rpc_url) as eth_client, CoinGeckoClient() as cg_client:
-            bot_info = await BotInfo.from_rpc(
-                eth_client, cg_client, bot_name, watched_address, weth_contract)
-            analyzer = TxAnalyzer(eth_client, weth_contract, watched_address,
-                                  cg_client=cg_client,
-                                  coingecko_id=bot_info.coingecko_id,
-                                  token_symbol=bot_info.token_symbol)
+            tokens = await build_tokens(eth_client, cg_client, wrapped, base)
+            for t in tokens:
+                logging.info(f"Token {t.symbol} ({t.address}) decimals={t.decimals} "
+                             f"coingecko_id={t.coingecko_id}")
+            analyzer = TxAnalyzer(eth_client, tokens, watched_address, cg_client=cg_client)
             if start_block is not None:
                 await analyzer.analyze_from_block(start_block)
             else:
                 await analyzer.analyze_single_block(block)
 
     asyncio.run(run_analysis())
-
 
 
 @cli.command()
@@ -150,13 +165,14 @@ def monitor(config: str, bot_name: Optional[str] = None):
         ws_connectors = []
 
         for name, bot_cfg in bots_to_monitor.items():
-            weth_contract = bot_cfg['token_contract_address'].lower()
+            wrapped, base = get_token_addresses(bot_cfg)
             watched_address = bot_cfg['watched_address'].lower()
             ws_url, ws_login, ws_password = parse_ws_rpc(bot_cfg.get('ws_rpc_url'))
             http_rpc_url = bot_cfg.get('http_rpc_url')
 
             logging.info(f"Setting up monitoring for bot '{name}':")
-            logging.info(f"Token contract: {weth_contract}")
+            logging.info(f"Wrapped token: {wrapped}")
+            logging.info(f"Base tokens: {base}")
             logging.info(f"Watched address: {watched_address}")
 
             ws = WsConnectorRaw(ws_url, login=ws_login, password=ws_password, name=name)
@@ -165,13 +181,13 @@ def monitor(config: str, bot_name: Optional[str] = None):
             await eth_client.__aenter__()
             eth_clients.append(eth_client)
 
-            bot_info = await BotInfo.from_rpc(
-                eth_client, cg_client, name, watched_address, weth_contract)
+            tokens = await build_tokens(eth_client, cg_client, wrapped, base)
+            bot_info = await BotInfo.from_rpc(eth_client, name, watched_address, tokens)
 
             if notifier:
                 notifier.register_bot(bot_info)
 
-            watcher = TxWatcher(eth_client, weth_contract, watched_address,
+            watcher = TxWatcher(eth_client, tokens, watched_address,
                                 bot_name=name, notifier=notifier)
             await watcher.subscribe(ws)
             tasks.append(ws.run())

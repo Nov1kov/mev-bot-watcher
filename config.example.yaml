@@ -10,20 +10,27 @@
 
 bots:
   ethereum:
-    token_contract_address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
+    # wrapped_token — обёртка нативного токена (WETH); её цена используется для
+    # оценки потраченного газа и она тоже учитывается как профитный токен.
+    wrapped_token: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
+    # base_tokens (опционально) — дополнительные токены, чьё изменение баланса
+    # бота учитывается в профите (например, стейблы для арбитража).
+    base_tokens:
+      - '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'   # USDC
+      - '0xdAC17F958D2ee523a2206206994597C13D831ec7'   # USDT
     watched_address: '0xYOUR_BOT_ADDRESS'
     http_rpc_url: 'https://your-rpc-provider.com/api-key'
     ws_rpc_url: 'wss://your-rpc-provider.com/api-key'
 
   arbitrum:
-    token_contract_address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'
+    wrapped_token: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'
     watched_address: '0xYOUR_BOT_ADDRESS'
     http_rpc_url: 'https://your-rpc-provider.com/api-key'
     ws_rpc_url: 'ws://your-node-ip:8550'
 
   # Example with Basic Auth over WebSocket (login/password as a sub-section):
   # monad:
-  #   token_contract_address: '0x...'
+  #   wrapped_token: '0x...'
   #   watched_address: '0xYOUR_BOT_ADDRESS'
   #   http_rpc_url: 'http://user:pass@your-node-ip:8549'
   #   ws_rpc_url:

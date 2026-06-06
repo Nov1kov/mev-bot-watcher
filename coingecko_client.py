@@ -6,9 +6,11 @@ import aiohttp
 
 COINGECKO_BASE_URL = "https://api.coingecko.com/api/v3"
 
-# Оверрайды для популярных нативных токенов. Нужны для разрешения
-# неоднозначности (у одного тикера может быть много coin id в CoinGecko).
-_KNOWN_NATIVE_IDS = {
+# Оверрайды для популярных токенов. Нужны для разрешения неоднозначности
+# (у одного тикера может быть много coin id в CoinGecko). Покрывают как
+# нативные токены, так и распространённые стейблкоины (base_tokens).
+_KNOWN_IDS = {
+    # native
     "eth": "ethereum",
     "btc": "bitcoin",
     "bnb": "binancecoin",
@@ -22,6 +24,16 @@ _KNOWN_NATIVE_IDS = {
     "ada": "cardano",
     "dot": "polkadot",
     "mon": "monad",
+    # stablecoins / common base tokens
+    "usdc": "usd-coin",
+    "usdt": "tether",
+    "usde": "ethena-usde",
+    "dai": "dai",
+    "usds": "usds",
+    "frax": "frax",
+    "tusd": "true-usd",
+    "busd": "binance-usd",
+    "usdc.e": "usd-coin",
 }
 
 
@@ -77,8 +89,8 @@ class CoinGeckoClient:
 
     def _confident_lookup(self, sym: str) -> Optional[str]:
         """Возвращает id только если уверены: либо оверрайд, либо id == sym."""
-        if sym in _KNOWN_NATIVE_IDS:
-            return _KNOWN_NATIVE_IDS[sym]
+        if sym in _KNOWN_IDS:
+            return _KNOWN_IDS[sym]
         for cid in self._symbol_to_ids.get(sym) or []:
             if cid == sym:
                 return cid

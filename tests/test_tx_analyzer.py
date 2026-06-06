@@ -6,80 +6,106 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tx_analyzer import TxAnalyzer, normalize_address
+from tx_analyzer import TxAnalyzer, TokenInfo, normalize_address, compute_profit_usd_for
 
-WATCHED_ADDRESS = "0x0000000000deadbeef00112233445566778899aa"
-WETH_CONTRACT = "0x82af49447d8a07e3bd95bd0d56f35241523fbab1"
+TRANSFER = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+DEPOSIT = "0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c"
+WITHDRAWAL = "0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65"
+# Произвольные не-Transfer сигнатуры (должны игнорироваться парсером)
+APPROVAL = "0x" + "a0" * 32
+OTHER_EVENT = "0x" + "9e" * 32
 
-# Реальный receipt: fail транзакция на Arbitrum
-# https://arbiscan.io/tx/0x3b9b86db4a1a8b999c8c933310a67a28488a7d5d4aea22d74c190843b83a6c17
+# Синтетические хэши транзакций
+FAIL_TX_HASH = "0x" + "fa" * 32
+SUCCESS_TX_HASH = "0x" + "5e" * 32
+MULTITOKEN_TX_HASH = "0x" + "70" * 32
+MONAD_TX_HASH = "0x" + "60" * 32
+
+WATCHED_ADDRESS = "0x000000000000000000000000000000000000a11a"
+WETH_CONTRACT = "0x1111111111111111111111111111111111111111"
+
+
+def pad(addr: str) -> str:
+    """Адрес в виде 32-байтового topic (left-padded до 64 hex)."""
+    return "0x" + addr[2:].lower().zfill(64)
+
+
+def weth_token(address: str = WETH_CONTRACT, symbol: str = "WETH",
+               decimals: int = 18, coingecko_id="ethereum") -> TokenInfo:
+    return TokenInfo(address=address, symbol=symbol, decimals=decimals,
+                     coingecko_id=coingecko_id, is_wrapped=True)
+
+
+def make_analyzer(tokens=None, watched=WATCHED_ADDRESS, eth_client=None,
+                  cg_client=None) -> TxAnalyzer:
+    """Создаёт TxAnalyzer (по умолчанию — один WETH-токен) для тестов."""
+    if tokens is None:
+        tokens = [weth_token()]
+    return TxAnalyzer(eth_client=eth_client, tokens=tokens,
+                      watched_address=watched, cg_client=cg_client)
+
+
+def net(result, token_address):
+    return result['net_by_token'][normalize_address(token_address)]
+
+
+# Синтетический receipt: fail-транзакция (логов нет, убыток равен стоимости газа)
 FAIL_RECEIPT = {
     "status": "0x0",
     "logs": [],
-    "transactionHash": "0x3b9b86db4a1a8b999c8c933310a67a28488a7d5d4aea22d74c190843b83a6c17",
-    "from": "0x0000000000face00000000000000000000cafe00",
-    "to": "0x0000000000deadbeef00112233445566778899aa",
+    "transactionHash": FAIL_TX_HASH,
+    "from": "0x00000000000000000000000000000000000face0",
+    "to": WATCHED_ADDRESS,
     "gasUsed": "0x462ad",
     "effectiveGasPrice": "0x139cff0",
 }
 
-# Реальный receipt: успешная транзакция на Arbitrum
-# https://arbiscan.io/tx/0xbefc153d4cf017b1579a17af23bb27d543c58cbd37b3b3dd196dc044292f6336
+# Синтетический receipt: успешная транзакция (spread по WETH положительный,
+# но газ делает итог в wei отрицательным)
+COUNTERPARTY_A = "0x2222222222222222222222222222222222222222"
+COUNTERPARTY_B = "0x4444444444444444444444444444444444444444"
+OTHER_TOKEN = "0x3333333333333333333333333333333333333333"
+OTHER_POOL = "0x5555555555555555555555555555555555555555"
+
 SUCCESS_RECEIPT = {
     "status": "0x1",
     "logs": [
+        # WETH Transfer COUNTERPARTY_A -> watched (incoming)
         {
-            "address": "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
-            "topics": [
-                "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
-                "0x000000000000000000000000389938cf14be379217570d8e4619e51fbdafaa21",
-                "0x0000000000000000000000000000000000deadbeef00112233445566778899aa"
-            ],
+            "address": WETH_CONTRACT,
+            "topics": [TRANSFER, pad(COUNTERPARTY_A), pad(WATCHED_ADDRESS)],
             "data": "0x000000000000000000000000000000000000000000000000008bc909c5707ec5",
         },
+        # Transfer другого токена (не отслеживается) — игнор
         {
-            "address": "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9",
-            "topics": [
-                "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
-                "0x000000000000000000000000aa89ba37d1975ae294974ebb33db9d4b5324f2f2",
-                "0x000000000000000000000000389938cf14be379217570d8e4619e51fbdafaa21"
-            ],
+            "address": OTHER_TOKEN,
+            "topics": [TRANSFER, pad("0x6666666666666666666666666666666666666666"),
+                       pad(COUNTERPARTY_A)],
             "data": "0x0000000000000000000000000000000000000000000000000000000004d3ad0c",
         },
+        # WETH Transfer watched -> COUNTERPARTY_B (outgoing)
         {
-            "address": "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
-            "topics": [
-                "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
-                "0x0000000000000000000000000000000000deadbeef00112233445566778899aa",
-                "0x0000000000000000000000004bfc22a4da7f31f8a912a79a7e44a822398b4390"
-            ],
+            "address": WETH_CONTRACT,
+            "topics": [TRANSFER, pad(WATCHED_ADDRESS), pad(COUNTERPARTY_B)],
             "data": "0x000000000000000000000000000000000000000000000000008bc612a9452b98",
         },
+        # Событие пула (не Transfer) — игнор
         {
-            "address": "0x4bfc22a4da7f31f8a912a79a7e44a822398b4390",
-            "topics": [
-                "0x19b47279256b2a23a1665c810c8d55a1758940ee09377d4f8d26497a3577dc83",
-                "0x0000000000000000000000000000000000deadbeef00112233445566778899aa",
-                "0x000000000000000000000000aa89ba37d1975ae294974ebb33db9d4b5324f2f2"
-            ],
+            "address": OTHER_POOL,
+            "topics": [OTHER_EVENT, pad(WATCHED_ADDRESS), pad(COUNTERPARTY_A)],
             "data": "0x00000000",
         },
     ],
-    "transactionHash": "0xbefc153d4cf017b1579a17af23bb27d543c58cbd37b3b3dd196dc044292f6336",
-    "from": "0x0000000000face00000000000000000000cafe00",
-    "to": "0x0000000000deadbeef00112233445566778899aa",
+    "transactionHash": SUCCESS_TX_HASH,
+    "from": "0x00000000000000000000000000000000000face0",
+    "to": WATCHED_ADDRESS,
     "gasUsed": "0x62bad",
     "effectiveGasPrice": "0x1312d00",
 }
 
 
-def make_analyzer() -> TxAnalyzer:
-    """Создаёт TxAnalyzer без реального eth_client (для тестов parse_receipt)"""
-    return TxAnalyzer(eth_client=None, weth_contract_address=WETH_CONTRACT, watched_address=WATCHED_ADDRESS)
-
-
 class TestParseReceiptFail(unittest.TestCase):
-    """Тесты обработки fail-транзакции (реальные данные Arbitrum)"""
+    """Тесты обработки fail-транзакции"""
 
     def setUp(self):
         self.analyzer = make_analyzer()
@@ -88,11 +114,8 @@ class TestParseReceiptFail(unittest.TestCase):
     def test_status_is_zero(self):
         self.assertEqual(self.result['status'], 0)
 
-    def test_no_incoming(self):
-        self.assertEqual(self.result['incoming_wei'], [])
-
-    def test_no_outgoing(self):
-        self.assertEqual(self.result['outgoing_wei'], [])
+    def test_net_zero(self):
+        self.assertEqual(net(self.result, WETH_CONTRACT), 0)
 
     def test_gas_fee_calculated(self):
         expected_gas = int("0x462ad", 16) * int("0x139cff0", 16)
@@ -102,14 +125,9 @@ class TestParseReceiptFail(unittest.TestCase):
     def test_tx_hash(self):
         self.assertEqual(self.result['tx_hash'], FAIL_RECEIPT['transactionHash'])
 
-    def test_net_loss_equals_gas(self):
-        """Для fail-транзакции убыток = стоимость gas"""
-        net = sum(self.result['incoming_wei']) - sum(self.result['outgoing_wei']) - self.result['gas_fee_wei']
-        self.assertEqual(net, -self.result['gas_fee_wei'])
-
 
 class TestParseReceiptSuccess(unittest.TestCase):
-    """Тесты обработки успешной транзакции (реальные данные Arbitrum)"""
+    """Тесты обработки успешной транзакции"""
 
     def setUp(self):
         self.analyzer = make_analyzer()
@@ -118,42 +136,31 @@ class TestParseReceiptSuccess(unittest.TestCase):
     def test_status_is_one(self):
         self.assertEqual(self.result['status'], 1)
 
-    def test_incoming_weth(self):
-        """WETH Transfer TO watched address (log 0)"""
-        expected = int("0x008bc909c5707ec5", 16)
-        self.assertEqual(self.result['incoming_wei'], [expected])
-
-    def test_outgoing_weth(self):
-        """WETH Transfer FROM watched address (log 2)"""
-        expected = int("0x008bc612a9452b98", 16)
-        self.assertEqual(self.result['outgoing_wei'], [expected])
+    def test_net_weth(self):
+        """net WETH = incoming (log 0) - outgoing (log 2)"""
+        incoming = int("0x008bc909c5707ec5", 16)
+        outgoing = int("0x008bc612a9452b98", 16)
+        self.assertEqual(net(self.result, WETH_CONTRACT), incoming - outgoing)
 
     def test_ignores_non_weth_logs(self):
-        """Не-WETH логи (USDT, pool events) должны быть проигнорированы"""
-        total_transfers = len(self.result['incoming_wei']) + len(self.result['outgoing_wei'])
-        self.assertEqual(total_transfers, 2)  # только 2 WETH Transfer-а
+        """Не-WETH логи (другие токены, pool events) не влияют на net WETH"""
+        self.assertGreater(net(self.result, WETH_CONTRACT), 0)
 
     def test_gas_fee_calculated(self):
         expected_gas = int("0x62bad", 16) * int("0x1312d00", 16)
         self.assertEqual(self.result['gas_fee_wei'], expected_gas)
 
-    def test_net_change(self):
-        """Spread положительный, но gas делает итог отрицательным"""
-        incoming = sum(self.result['incoming_wei'])
-        outgoing = sum(self.result['outgoing_wei'])
-        spread = incoming - outgoing
-        self.assertGreater(spread, 0)  # spread положительный
-        net = spread - self.result['gas_fee_wei']
-        self.assertLess(net, 0)  # но gas съедает прибыль
-
-    def test_tx_hash(self):
-        self.assertEqual(self.result['tx_hash'], SUCCESS_RECEIPT['transactionHash'])
+    def test_net_minus_gas_negative(self):
+        """Spread положительный, но gas делает итог (в wei) отрицательным"""
+        spread = net(self.result, WETH_CONTRACT)
+        self.assertGreater(spread, 0)
+        self.assertLess(spread - self.result['gas_fee_wei'], 0)
 
 
 class TestParseReceiptIgnoresOtherTokens(unittest.TestCase):
-    """Тест: логи других контрактов не учитываются"""
+    """Тест: логи токенов вне списка отслеживаемых не учитываются"""
 
-    def test_only_weth_transfers_counted(self):
+    def test_only_tracked_transfers_counted(self):
         analyzer = make_analyzer()
         receipt = {
             "status": "0x1",
@@ -161,12 +168,9 @@ class TestParseReceiptIgnoresOtherTokens(unittest.TestCase):
             "effectiveGasPrice": "0x3b9aca00",
             "logs": [
                 {
-                    "address": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                    "topics": [
-                        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
-                        "0x0000000000000000000000000000000000deadbeef00112233445566778899aa",
-                        "0x0000000000000000000000001111111111111111111111111111111111111111"
-                    ],
+                    "address": "0x9999999999999999999999999999999999999999",
+                    "topics": [TRANSFER, pad(WATCHED_ADDRESS),
+                               pad("0x1212121212121212121212121212121212121212")],
                     "data": "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000",
                 },
             ],
@@ -174,98 +178,203 @@ class TestParseReceiptIgnoresOtherTokens(unittest.TestCase):
         result = analyzer.parse_receipt(receipt, "0xfake")
         self.assertEqual(result['status'], 1)
         self.assertEqual(result['tx_hash'], "0xfake")
-        self.assertEqual(result['incoming_wei'], [])
-        self.assertEqual(result['outgoing_wei'], [])
+        self.assertEqual(net(result, WETH_CONTRACT), 0)
 
 
-# Реальный блок 432537070 (0x19c7fdee) на Arbitrum
-# Содержит fail-транзакцию 0x3b9b86... с to=watched_address
-BLOCK_432537070 = {
-    "number": "0x19c7fdee",
+# ────────────────────────────────────────────────────────────────────────────
+# Мультитокенный сценарий: бот арбитражит стейблы. Профит сделан в USDC
+# (+1.719842), USDe проходит транзитом (net 0), газ платится в ETH. Ни одного
+# WETH-перевода в транзакции нет. Все адреса синтетические.
+WETH_ETH = "0x1010101010101010101010101010101010101010"
+USDC = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+USDE = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+USDT = "0xcccccccccccccccccccccccccccccccccccccccc"
+DAI = "0xdddddddddddddddddddddddddddddddddddddddd"
+ETH_WATCHED = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+
+CP_POOL = "0x6666666666666666666666666666666666666666"
+CP_ROUTER = "0x7777777777777777777777777777777777777777"
+CP_PM = "0x8888888888888888888888888888888888888888"
+
+MULTITOKEN_RECEIPT = {
+    "status": "0x1",
+    "gasUsed": "0x51e39",
+    "effectiveGasPrice": "0xbbda2bd4",
+    "transactionHash": MULTITOKEN_TX_HASH,
+    "from": "0x0000000000000000000000000000000000005ea6",
+    "to": ETH_WATCHED,
+    "logs": [
+        # USDC Transfer CP_POOL -> watched (incoming)
+        {"address": USDC, "topics": [TRANSFER, pad(CP_POOL), pad(ETH_WATCHED)],
+            "data": "0x00000000000000000000000000000000000000000000000000000000e3c5a166"},
+        # USDC Approval (watched, spender) — не Transfer, игнор
+        {"address": USDC, "topics": [APPROVAL, pad(ETH_WATCHED), pad(CP_ROUTER)],
+            "data": "0x00000000000000000000000000000000000000000000000000000000e3ab6344"},
+        # USDC Transfer watched -> CP_ROUTER (outgoing)
+        {"address": USDC, "topics": [TRANSFER, pad(ETH_WATCHED), pad(CP_ROUTER)],
+            "data": "0x00000000000000000000000000000000000000000000000000000000e3ab6344"},
+        # USDe Transfer CP_ROUTER -> watched (incoming)
+        {"address": USDE, "topics": [TRANSFER, pad(CP_ROUTER), pad(ETH_WATCHED)],
+            "data": "0x0000000000000000000000000000000000000000000000cf120c398b85715ecc"},
+        # USDT Transfer CP_PM -> CP_POOL (не watched, игнор для net)
+        {"address": USDT, "topics": [TRANSFER, pad(CP_PM), pad(CP_POOL)],
+            "data": "0x00000000000000000000000000000000000000000000000000000000e3cdb955"},
+        # USDe Transfer watched -> CP_PM (outgoing) — обнуляет USDe net
+        {"address": USDE, "topics": [TRANSFER, pad(ETH_WATCHED), pad(CP_PM)],
+            "data": "0x0000000000000000000000000000000000000000000000cf120c398b85715ecc"},
+    ],
+}
+
+
+def eth_tokens():
+    return [
+        TokenInfo(WETH_ETH, "WETH", 18, "ethereum", is_wrapped=True),
+        TokenInfo(USDC, "USDC", 6, "usd-coin"),
+        TokenInfo(USDE, "USDe", 18, "ethena-usde"),
+        TokenInfo(USDT, "USDT", 6, "tether"),
+        TokenInfo(DAI, "DAI", 18, "dai"),
+    ]
+
+
+class TestMultitokenReceipt(unittest.TestCase):
+    """Мультитокенный профит (синтетические адреса)"""
+
+    def setUp(self):
+        self.analyzer = make_analyzer(tokens=eth_tokens(), watched=ETH_WATCHED)
+        self.result = self.analyzer.parse_receipt(
+            MULTITOKEN_RECEIPT, MULTITOKEN_RECEIPT['transactionHash'])
+
+    def test_usdc_net_profit(self):
+        # 0xe3c5a166 - 0xe3ab6344 = 1_719_842 (raw, 6 знаков → +1.719842 USDC)
+        self.assertEqual(net(self.result, USDC), 1_719_842)
+
+    def test_usde_net_zero(self):
+        """USDe пришёл и ушёл поровну — net 0"""
+        self.assertEqual(net(self.result, USDE), 0)
+
+    def test_usdt_not_touching_watched_ignored(self):
+        """USDT перевод не затрагивает watched — net 0"""
+        self.assertEqual(net(self.result, USDT), 0)
+
+    def test_weth_untouched(self):
+        self.assertEqual(net(self.result, WETH_ETH), 0)
+
+    def test_gas(self):
+        self.assertEqual(self.result['gas_fee_wei'], 0x51e39 * 0xbbda2bd4)
+
+    def test_profit_usd(self):
+        """profit = 1.719842 USDC − gas_eth × ETH (с замоканными ценами)"""
+        prices = {"usd-coin": 1.0, "ethena-usde": 1.0, "tether": 1.0,
+                  "dai": 1.0, "ethereum": 2400.0}
+        gas_eth = (0x51e39 * 0xbbda2bd4) / 1e18
+        expected = 1.719842 * 1.0 - gas_eth * 2400.0
+        profit = self.analyzer.compute_profit_usd(
+            self.result['net_by_token'], self.result['gas_fee_wei'], prices)
+        self.assertAlmostEqual(profit, expected, places=6)
+
+    def test_profit_usd_none_without_prices(self):
+        profit = self.analyzer.compute_profit_usd(
+            self.result['net_by_token'], self.result['gas_fee_wei'], {})
+        self.assertIsNone(profit)
+
+
+class TestComputeProfitUsdHelper(unittest.TestCase):
+    """Модульная функция compute_profit_usd_for"""
+
+    def test_only_gas_when_no_token_change(self):
+        tokens = eth_tokens()
+        net_by_token = {t.address: 0 for t in tokens}
+        gas_wei = 10 ** 15  # 0.001 ETH
+        profit = compute_profit_usd_for(tokens, "ethereum", net_by_token, gas_wei,
+                                        {"ethereum": 2000.0})
+        self.assertAlmostEqual(profit, -0.001 * 2000.0, places=9)
+
+    def test_missing_token_price_skipped(self):
+        tokens = eth_tokens()
+        net_by_token = {t.address: 0 for t in tokens}
+        net_by_token[normalize_address(USDC)] = 5_000_000  # +5 USDC
+        # нет цены USDC, но есть нативная — USDC пропускается, газ учитывается
+        profit = compute_profit_usd_for(tokens, "ethereum", net_by_token, 0,
+                                        {"ethereum": 2000.0})
+        self.assertEqual(profit, 0.0)
+
+
+# Синтетический блок с тремя транзакциями: две нерелевантные и одна с to=watched
+SAMPLE_BLOCK_NUMBER = 0x100
+SAMPLE_BLOCK = {
+    "number": hex(SAMPLE_BLOCK_NUMBER),
     "transactions": [
-        # TX[0] — не наша, должна быть пропущена
         {
-            "from": "0x00000000000000000000000000000000000a4b05",
-            "to": "0x00000000000000000000000000000000000a4b05",
-            "hash": "0x4d645eec5e866d53a3758e0c20a35f615c1788c4b94db134d3f7847ee1aea880",
+            "from": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+            "to": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+            "hash": "0x" + "ab" * 32,
         },
-        # TX[1] — не наша, to=None (contract creation)
         {
             "from": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "to": None,
-            "hash": "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "hash": "0x" + "cd" * 32,
         },
-        # TX[2] — наша fail-транзакция (to == watched_address)
         {
-            "from": "0x0000000000face00000000000000000000cafe00",
-            "to": "0x0000000000DeAdBeEf00112233445566778899aA",  # checksummed, как в реальном блоке
-            "hash": "0x3b9b86db4a1a8b999c8c933310a67a28488a7d5d4aea22d74c190843b83a6c17",
+            "from": "0x00000000000000000000000000000000000face0",
+            "to": WATCHED_ADDRESS,
+            "hash": FAIL_TX_HASH,
         },
     ],
 }
 
 
 class TestAnalyzeBlockMatching(unittest.TestCase):
-    """Тест: analyze_block находит транзакцию по условию from/to == watched_address"""
+    """analyze_block находит транзакцию по from/to == watched_address"""
 
     def test_finds_matching_tx_by_to(self):
-        """Транзакция с to=watched_address должна быть обработана"""
         mock_client = MagicMock()
         mock_client.get_transaction_receipt = AsyncMock(return_value=FAIL_RECEIPT)
 
-        analyzer = TxAnalyzer(mock_client, WETH_CONTRACT, WATCHED_ADDRESS)
-        result = asyncio.run(analyzer.analyze_block(BLOCK_432537070))
+        analyzer = make_analyzer(eth_client=mock_client)
+        result = asyncio.run(analyzer.analyze_block(SAMPLE_BLOCK))
 
-        # receipt запрошен ровно 1 раз — только для matching транзакции
-        mock_client.get_transaction_receipt.assert_called_once_with(
-            "0x3b9b86db4a1a8b999c8c933310a67a28488a7d5d4aea22d74c190843b83a6c17"
-        )
+        mock_client.get_transaction_receipt.assert_called_once_with(FAIL_TX_HASH)
         self.assertIsNotNone(result)
         self.assertEqual(result['tx_count'], 1)
         self.assertEqual(result['fail_count'], 1)
         self.assertTrue(result['has_fails'])
-        self.assertEqual(result['block_number'], 432537070)
-        # Убыток = газ, т.к. fail-транзакция: incoming=0, outgoing=0
-        expected_gas = int("0x462ad", 16) * int("0x139cff0", 16)  # 5_921_252_487_120 wei
+        self.assertEqual(result['block_number'], SAMPLE_BLOCK_NUMBER)
+        expected_gas = int("0x462ad", 16) * int("0x139cff0", 16)
         self.assertEqual(result['total_gas_wei'], expected_gas)
-        self.assertEqual(result['net_wei_change'], -expected_gas)
+        self.assertEqual(result['net_by_token'][normalize_address(WETH_CONTRACT)], 0)
 
     def test_skips_non_matching_txs(self):
-        """Транзакции без watched_address в from/to не вызывают get_transaction_receipt"""
         mock_client = MagicMock()
         mock_client.get_transaction_receipt = AsyncMock()
 
         block_no_match = {
-            "number": "0x19c7fdee",
+            "number": "0x100",
             "transactions": [
                 {
                     "from": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     "to": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-                    "hash": "0x1111",
+                    "hash": "0x" + "11" * 32,
                 },
             ],
         }
-        analyzer = TxAnalyzer(mock_client, WETH_CONTRACT, WATCHED_ADDRESS)
+        analyzer = make_analyzer(eth_client=mock_client)
         result = asyncio.run(analyzer.analyze_block(block_no_match))
 
         mock_client.get_transaction_receipt.assert_not_called()
         self.assertIsNone(result)
 
     def test_matches_checksummed_address(self):
-        """Адрес в checksummed формате (mixed case) должен совпадать"""
         mock_client = MagicMock()
         mock_client.get_transaction_receipt = AsyncMock(return_value=FAIL_RECEIPT)
-
-        # watched_address в lowercase, в блоке — checksummed
-        analyzer = TxAnalyzer(mock_client, WETH_CONTRACT, WATCHED_ADDRESS)
+        analyzer = make_analyzer(eth_client=mock_client)
 
         block = {
             "number": "0x1",
             "transactions": [
                 {
-                    "from": "0xdeadbeef",
-                    "to": "0x0000000000DeAdBeEf00112233445566778899aA",  # checksummed
-                    "hash": "0xabc",
+                    "from": "0x000000000000000000000000000000000000dead",
+                    "to": WATCHED_ADDRESS.upper().replace("0X", "0x"),
+                    "hash": "0x" + "01" * 32,
                 },
             ],
         }
@@ -274,25 +383,23 @@ class TestAnalyzeBlockMatching(unittest.TestCase):
         mock_client.get_transaction_receipt.assert_called_once()
 
     def test_matches_by_from(self):
-        """Транзакция с from=watched_address тоже должна обрабатываться"""
         mock_client = MagicMock()
         mock_client.get_transaction_receipt = AsyncMock(return_value=FAIL_RECEIPT)
-
-        analyzer = TxAnalyzer(mock_client, WETH_CONTRACT, WATCHED_ADDRESS)
+        analyzer = make_analyzer(eth_client=mock_client)
 
         block = {
             "number": "0x1",
             "transactions": [
                 {
-                    "from": "0x0000000000DeAdBeEf00112233445566778899aA",
+                    "from": WATCHED_ADDRESS,
                     "to": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-                    "hash": "0xdef",
+                    "hash": "0x" + "02" * 32,
                 },
             ],
         }
         result = asyncio.run(analyzer.analyze_block(block))
         self.assertIsNotNone(result)
-        mock_client.get_transaction_receipt.assert_called_once_with("0xdef")
+        mock_client.get_transaction_receipt.assert_called_once_with("0x" + "02" * 32)
 
 
 class TestNormalizeAddress(unittest.TestCase):
@@ -309,7 +416,6 @@ class TestNormalizeAddress(unittest.TestCase):
             "0x0000000000deadbeef00112233445566778899aa")
 
     def test_short_address_without_padding(self):
-        """RPC может вернуть адрес без ведущих нулей"""
         self.assertEqual(
             normalize_address("0xdeadbeef00112233445566778899aa"),
             "0x0000000000deadbeef00112233445566778899aa")
@@ -325,65 +431,54 @@ class TestNormalizeAddress(unittest.TestCase):
             "0x0000000000deadbeef00112233445566778899aa")
 
 
-# Реальный receipt: успешная транзакция на Monad (block 69211058)
-# https://testnet.monadexplorer.com/tx/0x2d6e6978e9a102bd9748cb928c500fff8d8f882d66ede08a8dc12dd00ee11652
-# Бот оборачивает/разворачивает нативный MON через WMON.deposit() / WMON.withdraw():
-# эти события не эмитят ERC20 Transfer, старая логика их пропускала → tx считалась убытком.
-WMON_CONTRACT = "0x3bd359c1119da7da1d913d1c4d2b7c461115433a"
-MONAD_WATCHED = "0x000000000042963fab83cf5225e7f952191350bb"
+# Синтетический receipt: бот оборачивает/разворачивает нативный токен через
+# WMON.deposit()/withdraw() — эти события не эмитят ERC20 Transfer.
+WMON_CONTRACT = "0x2020202020202020202020202020202020202020"
+MONAD_WATCHED = "0xabababababababababababababababababababab"
+MONAD_OTHER_TOKEN = "0x3030303030303030303030303030303030303030"
+MONAD_POOL = "0x4040404040404040404040404040404040404040"
+
+
+def wmon_token():
+    return TokenInfo(WMON_CONTRACT, "WMON", 18, "monad", is_wrapped=True)
+
 
 MONAD_DEPOSIT_WITHDRAW_RECEIPT = {
     "status": "0x1",
     "gasUsed": "0x688b7",
     "effectiveGasPrice": "0x199c82cc00",
-    "transactionHash": "0x2d6e6978e9a102bd9748cb928c500fff8d8f882d66ede08a8dc12dd00ee11652",
+    "transactionHash": MONAD_TX_HASH,
     "logs": [
-        # Pool sync (не WMON) — должен игнорироваться
+        # Событие пула (не Transfer) — игнор
         {
-            "address": "0x188d586ddcf52439676ca21a244753fa19f9ea8e",
-            "topics": [
-                "0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f",
-                "0x39db55f90266305ae94bcd7f750f6f191e300ff8f806dca7d143eaf22a7548da",
-                "0x000000000000000000000000000000000042963fab83cf5225e7f952191350bb",
-            ],
+            "address": MONAD_POOL,
+            "topics": [OTHER_EVENT,
+                       pad("0x5151515151515151515151515151515151515151"),
+                       pad(MONAD_WATCHED)],
             "data": "0x00",
         },
-        # Transfer другого токена TO watched — должен игнорироваться (не WMON)
+        # Transfer другого токена TO watched — игнор (не WMON)
         {
-            "address": "0x0e8a4f5c5c6dd44ebeabed5073582ce48be112aa",
-            "topics": [
-                "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
-                "0x000000000000000000000000188d586ddcf52439676ca21a244753fa19f9ea8e",
-                "0x000000000000000000000000000000000042963fab83cf5225e7f952191350bb",
-            ],
+            "address": MONAD_OTHER_TOKEN,
+            "topics": [TRANSFER, pad(MONAD_POOL), pad(MONAD_WATCHED)],
             "data": "0x0000000000000000000000000000000000000000000000000000000010924f98",
         },
-        # Transfer другого токена FROM watched — тоже не WMON, игнор
+        # Transfer другого токена FROM watched — игнор (не WMON)
         {
-            "address": "0x0e8a4f5c5c6dd44ebeabed5073582ce48be112aa",
-            "topics": [
-                "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
-                "0x000000000000000000000000000000000042963fab83cf5225e7f952191350bb",
-                "0x000000000000000000000000188d586ddcf52439676ca21a244753fa19f9ea8e",
-            ],
+            "address": MONAD_OTHER_TOKEN,
+            "topics": [TRANSFER, pad(MONAD_WATCHED), pad(MONAD_POOL)],
             "data": "0x0000000000000000000000000000000000000000000000000000000010924f98",
         },
-        # WMON Deposit(dst=watched, wad=0x1dd86d1937567255) — incoming
+        # WMON Deposit(dst=watched) — incoming
         {
-            "address": "0x3bd359c1119da7da1d913d1c4d2b7c461115433a",
-            "topics": [
-                "0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c",
-                "0x000000000000000000000000000000000042963fab83cf5225e7f952191350bb",
-            ],
+            "address": WMON_CONTRACT,
+            "topics": [DEPOSIT, pad(MONAD_WATCHED)],
             "data": "0x0000000000000000000000000000000000000000000000001dd86d1937567255",
         },
-        # WMON Withdrawal(src=watched, wad=0x1c9f9d48ccc0409b) — outgoing
+        # WMON Withdrawal(src=watched) — outgoing
         {
-            "address": "0x3bd359c1119da7da1d913d1c4d2b7c461115433a",
-            "topics": [
-                "0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65",
-                "0x000000000000000000000000000000000042963fab83cf5225e7f952191350bb",
-            ],
+            "address": WMON_CONTRACT,
+            "topics": [WITHDRAWAL, pad(MONAD_WATCHED)],
             "data": "0x0000000000000000000000000000000000000000000000001c9f9d48ccc0409b",
         },
     ],
@@ -391,45 +486,31 @@ MONAD_DEPOSIT_WITHDRAW_RECEIPT = {
 
 
 class TestParseReceiptDepositWithdrawal(unittest.TestCase):
-    """Учёт WMON/WETH Deposit + Withdrawal на watched адресе (native wrap/unwrap)"""
+    """Учёт WMON/WETH Deposit + Withdrawal на watched (native wrap/unwrap)"""
 
     DEPOSIT_AMOUNT = 0x1dd86d1937567255
     WITHDRAW_AMOUNT = 0x1c9f9d48ccc0409b
 
     def setUp(self):
-        self.analyzer = TxAnalyzer(eth_client=None,
-                                    weth_contract_address=WMON_CONTRACT,
-                                    watched_address=MONAD_WATCHED)
+        self.analyzer = make_analyzer(tokens=[wmon_token()], watched=MONAD_WATCHED)
         self.result = self.analyzer.parse_receipt(
             MONAD_DEPOSIT_WITHDRAW_RECEIPT,
             MONAD_DEPOSIT_WITHDRAW_RECEIPT['transactionHash'])
 
-    def test_deposit_counted_as_incoming(self):
-        self.assertEqual(self.result['incoming_wei'], [self.DEPOSIT_AMOUNT])
-
-    def test_withdrawal_counted_as_outgoing(self):
-        self.assertEqual(self.result['outgoing_wei'], [self.WITHDRAW_AMOUNT])
-
-    def test_transfers_on_other_tokens_ignored(self):
-        """Transfer-события других токенов не учитываются."""
-        self.assertEqual(len(self.result['incoming_wei']), 1)
-        self.assertEqual(len(self.result['outgoing_wei']), 1)
+    def test_net_is_deposit_minus_withdraw(self):
+        self.assertEqual(net(self.result, WMON_CONTRACT),
+                         self.DEPOSIT_AMOUNT - self.WITHDRAW_AMOUNT)
 
     def test_net_is_profit_after_gas(self):
-        """Реальная транзакция прибыльная: deposit > withdraw + gas."""
-        net = (sum(self.result['incoming_wei'])
-               - sum(self.result['outgoing_wei'])
-               - self.result['gas_fee_wei'])
-        self.assertGreater(net, 0)
+        n = net(self.result, WMON_CONTRACT)
+        self.assertGreater(n - self.result['gas_fee_wei'], 0)
 
 
 class TestParseReceiptIgnoresDepositsOfOthers(unittest.TestCase):
     """Deposit/Withdrawal других адресов на WETH-контракте игнорируются."""
 
     def test_other_dst_deposit_ignored(self):
-        analyzer = TxAnalyzer(eth_client=None,
-                               weth_contract_address=WMON_CONTRACT,
-                               watched_address=MONAD_WATCHED)
+        analyzer = make_analyzer(tokens=[wmon_token()], watched=MONAD_WATCHED)
         receipt = {
             "status": "0x1",
             "gasUsed": "0x5208",
@@ -437,51 +518,69 @@ class TestParseReceiptIgnoresDepositsOfOthers(unittest.TestCase):
             "logs": [
                 {
                     "address": WMON_CONTRACT,
-                    "topics": [
-                        "0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c",
-                        "0x0000000000000000000000001111111111111111111111111111111111111111",
-                    ],
+                    "topics": [DEPOSIT, pad("0x1111111111111111111111111111111111111111")],
                     "data": "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000",
                 },
                 {
                     "address": WMON_CONTRACT,
-                    "topics": [
-                        "0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65",
-                        "0x0000000000000000000000002222222222222222222222222222222222222222",
-                    ],
+                    "topics": [WITHDRAWAL, pad("0x2222222222222222222222222222222222222222")],
                     "data": "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000",
                 },
             ],
         }
         result = analyzer.parse_receipt(receipt, "0xfake")
-        self.assertEqual(result['incoming_wei'], [])
-        self.assertEqual(result['outgoing_wei'], [])
+        self.assertEqual(net(result, WMON_CONTRACT), 0)
+
+
+class TestBaseTokenDoesNotCountDepositWithdrawal(unittest.TestCase):
+    """Deposit/Withdrawal учитываются только для wrapped, не для base_tokens."""
+
+    def test_base_token_deposit_ignored(self):
+        tokens = [
+            TokenInfo(WETH_ETH, "WETH", 18, "ethereum", is_wrapped=True),
+            TokenInfo(USDC, "USDC", 6, "usd-coin"),
+        ]
+        analyzer = make_analyzer(tokens=tokens, watched=ETH_WATCHED)
+        receipt = {
+            "status": "0x1",
+            "gasUsed": "0x5208",
+            "effectiveGasPrice": "0x3b9aca00",
+            "logs": [
+                # Deposit topic на base-токене (USDC) — не должен учитываться
+                {
+                    "address": USDC,
+                    "topics": [DEPOSIT, pad(ETH_WATCHED)],
+                    "data": "0x00000000000000000000000000000000000000000000000000000000000f4240",
+                },
+            ],
+        }
+        result = analyzer.parse_receipt(receipt, "0xfake")
+        self.assertEqual(net(result, USDC), 0)
 
 
 class TestAnalyzeBlockShortAddress(unittest.TestCase):
-    """Тест: адрес без ведущих нулей из RPC должен совпадать"""
+    """Адрес без ведущих нулей из RPC должен совпадать"""
 
     def test_matches_short_to_address(self):
-        """RPC вернул to без leading zeros — должен совпасть"""
         mock_client = MagicMock()
         mock_client.get_transaction_receipt = AsyncMock(return_value=FAIL_RECEIPT)
-
-        analyzer = TxAnalyzer(mock_client, WETH_CONTRACT, WATCHED_ADDRESS)
+        # watched с ведущими нулями; в блоке тот же адрес придёт без них
+        analyzer = make_analyzer(eth_client=mock_client,
+                                 watched="0x0000000000deadbeef00112233445566778899aa")
 
         block = {
             "number": "0x1",
             "transactions": [
                 {
-                    "from": "0xdeadbeef",
-                    # Адрес БЕЗ ведущих нулей — именно так может прийти из RPC
+                    "from": "0x000000000000000000000000000000000000dead",
                     "to": "0xDeAdBeEf00112233445566778899aA",
-                    "hash": "0xshort_test",
+                    "hash": "0x" + "5a" * 32,
                 },
             ],
         }
         result = asyncio.run(analyzer.analyze_block(block))
         self.assertIsNotNone(result)
-        mock_client.get_transaction_receipt.assert_called_once_with("0xshort_test")
+        mock_client.get_transaction_receipt.assert_called_once_with("0x" + "5a" * 32)
 
 
 if __name__ == "__main__":

@@ -99,6 +99,17 @@ class EthClient:
         result = await self.eth_call('eth_call', [{'to': address, 'data': '0x95d89b41'}, 'latest'])
         return _decode_abi_string(result)
 
+    async def get_decimals(self, address: str) -> int:
+        """Количество знаков ERC20 токена через RPC вызов decimals().
+
+        Фоллбэк на 18, если контракт не отвечает (нестандартный токен).
+        """
+        # function selector: keccak256("decimals()")[:4] = 0x313ce567
+        result = await self.eth_call('eth_call', [{'to': address, 'data': '0x313ce567'}, 'latest'])
+        if not result or result == '0x':
+            return 18
+        return int(result, 16)
+
     async def eth_getBlockReceipts(self, block_number: int | str) -> Dict:
         """Функция для получения receipt о блоке"""
         receipts = await self.eth_call('eth_getBlockReceipts', [hex(block_number) if isinstance(block_number, int) else block_number])

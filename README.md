@@ -8,14 +8,15 @@
 
 CLI tool for analyzing and realtime monitoring of MEV bot profitability on EVM-compatible networks (Ethereum, Arbitrum, etc.).
 
-Scans historical blocks or subscribes to new ones via WebSocket, finds transactions of a watched address, parses ERC20 Transfer events and calculates P&L (incoming tokens - outgoing tokens - gas).
+Scans historical blocks or subscribes to new ones via WebSocket, finds transactions of a watched address, parses ERC20 Transfer (and WETH Deposit/Withdrawal) events for a set of tracked tokens and calculates P&L converted to USD: `Σ(net per token × price) − gas spent in the native token × native price`.
 
 ## Features
 
+- **Multi-token P&L in USD** — track the wrapped native token plus any number of `base_tokens` (e.g. USDC/USDT/DAI for stablecoin arbitrage); each token's balance change is valued at its own price and decimals, gas is valued via the native token
 - **Retrospective analysis** — scan a range of blocks, calculate profit per block and total summary
 - **Realtime monitoring** — subscribe to new blocks via WebSocket
 - **Multichain** — multiple networks via config (Ethereum, Arbitrum, etc.)
-- **Telegram notifications** — aggregated reports with configurable interval and USD prices
+- **Telegram notifications** — aggregated reports with configurable interval, USD profit and per-token balances
 
 ## Configuration
 
@@ -29,11 +30,22 @@ telegram:
 
 bots:
   ethereum:
-    token_contract_address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
+    # wrapped_token — the wrapped native token (WETH). Its price values the gas
+    # spent, and it is also counted as a profit token.
+    wrapped_token: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
+    # base_tokens (optional) — extra tokens whose balance change is included in
+    # the profit (e.g. stablecoins for arbitrage). Each may have its own decimals.
+    base_tokens:
+      - '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'   # USDC
+      - '0xdAC17F958D2ee523a2206206994597C13D831ec7'   # USDT
     watched_address: '0xYOUR_BOT_ADDRESS'
     http_rpc_url: 'https://your-rpc-provider.com/api-key'
     ws_rpc_url: 'wss://your-rpc-provider.com/api-key'
 ```
+
+Token `symbol`/`decimals` are read from each contract over RPC, and the USD price
+is auto-resolved via CoinGecko by symbol. For tokens that are not the wrapped
+native token, `base_tokens` is optional — omit it for single-token bots.
 
 ### WebSocket with Basic Auth
 
@@ -44,7 +56,7 @@ stays supported for endpoints without auth.
 ```yaml
 bots:
   my_node:
-    token_contract_address: '0x...'
+    wrapped_token: '0x...'
     watched_address: '0xYOUR_BOT_ADDRESS'
     http_rpc_url: 'http://user:pass@your-node-ip:8549'
     ws_rpc_url:
@@ -55,29 +67,33 @@ bots:
 
 ## Telegram notifications
 
-Startup message. Ticker and balance are fetched via RPC (symbol + native `eth_getBalance` + wrapped ERC20 `balanceOf`, summed together); USD price is auto-resolved via CoinGecko:
+Startup message. Per-token balances are fetched via RPC (native `eth_getBalance` + `balanceOf` for each tracked token); USD prices are auto-resolved via CoinGecko:
 ```
 🚀 MEV Monitor Started
 
 • ethereum (WETH — $3,210.50)
   0xYOUR_BOT_ADDRESS
-  💰 Balance: 1.5000 ETH ($4,815.75)
-
-• monad (WMON — $0.03)
-  0xYOUR_BOT_ADDRESS
-  💰 Balance: 42.0000 MON ($1.29)
+  💰 Balance:
+  ETH: 1.5000 ($4,815.75)
+  WETH: 0.0000 ($0.00)
+  USDC: 1000.0000 ($1,000.00)
 
 ⏰ Schedule: 0 * * * *
 ```
 
-If the token cannot be resolved on CoinGecko, the USD part is omitted and only the ticker is shown (e.g. `• monad (WMON)`).
+If a token cannot be resolved on CoinGecko, its USD part is omitted and only the amount is shown.
 
-Periodic report:
+Periodic report. Profit is the multi-token P&L converted to USD (token balance
+changes minus gas), and the current per-token balances are refreshed via RPC at
+send time:
 ```
 ✅ ETHEREUM
 0x1234...5678
 ├ Successful txs: 3/4
-└ Total: +0.001000 ETH ($+2.50)
+└ Total: $+2.50
+💰 Balance:
+  ETH: 1.4980 ($4,809.32)
+  USDC: 1001.7200 ($1,001.72)
 ```
 
 ## Usage

@@ -1,207 +1,149 @@
 import asyncio
 import time
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from telegram_notifier import TelegramNotifier, TxEvent, BotInfo, format_report
+from tx_analyzer import TokenInfo, normalize_address
+
+WETH = "0x1010101010101010101010101010101010101010"
+USDC = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+ARB_WETH = "0x2020202020202020202020202020202020202020"
+ADDR = "0x1234567890abcdef1234567890abcdef12345678"
+
+
+def weth_token(address=WETH, symbol="WETH", coingecko_id="ethereum"):
+    return TokenInfo(address, symbol, 18, coingecko_id, is_wrapped=True)
+
+
+def usdc_token():
+    return TokenInfo(USDC, "USDC", 6, "usd-coin")
+
+
+def make_bot(name="ethereum", tokens=None, native_balance=None, balances=None,
+             watched=ADDR):
+    if tokens is None:
+        tokens = [weth_token()]
+    return BotInfo(name=name, watched_address=watched, tokens=tokens,
+                   native_balance_wei=native_balance, balances=balances or {})
+
+
+def event(bot="ethereum", net_by_token=None, gas=0, tx_count=1, fail_count=0,
+          watched=ADDR, block=100):
+    if net_by_token is None:
+        net_by_token = {normalize_address(WETH): 0}
+    return TxEvent(bot_name=bot, watched_address=watched, block_number=block,
+                   tx_count=tx_count, fail_count=fail_count,
+                   net_by_token=net_by_token, gas_fee_wei=gas)
 
 
 class TestFormatReport(unittest.TestCase):
-    """Тесты форматирования отчёта"""
+    """Форматирование отчёта (профит в USD + балансы по токенам)"""
 
-    def test_single_profitable_event(self):
-        events = [TxEvent(
-            bot_name="ethereum",
-            watched_address="0x1234567890abcdef1234567890abcdef12345678",
-            block_number=18000000,
-            tx_count=1,
-            fail_count=0,
-            net_wei_change=1_000_000_000_000_000,  # +0.001 ETH
-            gas_fee_wei=500_000_000_000_000,
-        )]
-        msg = format_report(events)
+    def test_profit_usd_positive(self):
+        bots = {"ethereum": make_bot(tokens=[weth_token(), usdc_token()])}
+        events = [event(net_by_token={normalize_address(USDC): 5_000_000}, gas=0)]
+        msg = format_report(events, bots_info=bots, prices={"usd-coin": 1.0, "ethereum": 2500.0})
         self.assertIn("ETHEREUM", msg)
-        self.assertIn("0x1234...5678", msg)  # short address
-        self.assertIn("\u2705", msg)  # profit emoji
-        self.assertIn("+0.001000", msg)
+        self.assertIn("0x1234...5678", msg)
+        self.assertIn("✅", msg)
+        self.assertIn("$+5.00", msg)
         self.assertIn("Successful txs: 1/1", msg)
 
-    def test_single_losing_event(self):
-        events = [TxEvent(
-            bot_name="ethereum",
-            watched_address="0x1234567890abcdef1234567890abcdef12345678",
-            block_number=18000000,
-            tx_count=1,
-            fail_count=1,
-            net_wei_change=-500_000_000_000_000,
-            gas_fee_wei=500_000_000_000_000,
-        )]
-        msg = format_report(events)
-        self.assertIn("\u274c", msg)  # loss emoji
-        self.assertIn("Successful txs: 0/1", msg)
-        self.assertIn("-0.000500", msg)
+    def test_profit_usd_negative_from_gas(self):
+        bots = {"ethereum": make_bot(tokens=[weth_token(), usdc_token()])}
+        # +1 USDC, но газ 0.01 ETH × $2500 = $25 → убыток
+        events = [event(net_by_token={normalize_address(USDC): 1_000_000},
+                        gas=10 ** 16, fail_count=0)]
+        msg = format_report(events, bots_info=bots, prices={"usd-coin": 1.0, "ethereum": 2500.0})
+        self.assertIn("❌", msg)
+        self.assertIn("$-24.00", msg)
 
-    def test_zero_profit(self):
-        events = [TxEvent("ethereum", "0x1234567890abcdef1234567890abcdef12345678", 100, 1, 0, 0, 0)]
+    def test_no_bots_info_shows_na(self):
+        events = [event()]
         msg = format_report(events)
-        self.assertIn("\u2796", msg)  # neutral emoji
+        self.assertIn("n/a", msg)
+        self.assertIn("➖", msg)
 
-    def test_multiple_bots(self):
-        events = [
-            TxEvent("ethereum", "0x1234567890abcdef1234567890abcdef12345678", 100, 2, 0, 1_000_000_000_000_000, 200_000_000_000_000),
-            TxEvent("arbitrum", "0xabcdef1234567890abcdef1234567890abcdef12", 200, 3, 1, -500_000_000_000_000, 300_000_000_000_000),
-        ]
-        msg = format_report(events)
-        self.assertIn("ETHEREUM", msg)
-        self.assertIn("ARBITRUM", msg)
-        lines = msg.split("\n")
-        eth_line = next(l for l in lines if "ETHEREUM" in l)
-        arb_line = next(l for l in lines if "ARBITRUM" in l)
-        self.assertIn("\u2705", eth_line)
-        self.assertIn("\u274c", arb_line)
+    def test_balances_block_with_usd(self):
+        bots = {"ethereum": make_bot(
+            tokens=[weth_token(), usdc_token()],
+            native_balance=1_500_000_000_000_000_000,  # 1.5 ETH
+            balances={normalize_address(WETH): 2_000_000_000_000_000_000,  # 2 WETH
+                      normalize_address(USDC): 1_000_000_000},  # 1000 USDC
+        )}
+        events = [event(net_by_token={normalize_address(USDC): 1_000_000})]
+        msg = format_report(events, bots_info=bots,
+                            prices={"usd-coin": 1.0, "ethereum": 2000.0})
+        self.assertIn("Balance", msg)
+        self.assertIn("ETH: 1.5000", msg)
+        self.assertIn("WETH: 2.0000", msg)
+        self.assertIn("USDC: 1000.0000", msg)
+        self.assertIn("$3,000.00", msg)  # 1.5 ETH × 2000
 
     def test_aggregation_same_bot(self):
+        bots = {"ethereum": make_bot(tokens=[weth_token(), usdc_token()])}
         events = [
-            TxEvent("ethereum", "0x1234567890abcdef1234567890abcdef12345678", 100, 1, 0, 1_000_000_000_000_000, 100_000_000_000_000),
-            TxEvent("ethereum", "0x1234567890abcdef1234567890abcdef12345678", 101, 2, 1, 2_000_000_000_000_000, 200_000_000_000_000),
+            event(net_by_token={normalize_address(USDC): 1_000_000}, tx_count=1, fail_count=0),
+            event(net_by_token={normalize_address(USDC): 2_000_000}, tx_count=2, fail_count=1),
         ]
-        msg = format_report(events)
+        msg = format_report(events, bots_info=bots, prices={"usd-coin": 1.0, "ethereum": 2000.0})
         self.assertIn("Successful txs: 2/3", msg)
-        self.assertIn("+0.003000", msg)
+        self.assertIn("$+3.00", msg)
 
-    def test_all_successful(self):
-        events = [TxEvent("ethereum", "0x1234567890abcdef1234567890abcdef12345678", 100, 3, 0, 1_000_000_000_000_000, 100_000_000_000_000)]
-        msg = format_report(events)
-        self.assertIn("Successful txs: 3/3", msg)
-
-    def test_no_gas_line(self):
-        events = [TxEvent("ethereum", "0x1234567890abcdef1234567890abcdef12345678", 100, 1, 0, 0, 3_500_000_000_000_000)]
-        msg = format_report(events)
-        self.assertNotIn("Gas:", msg)
-
-    def test_usd_price_shown(self):
-        events = [TxEvent(
-            bot_name="ethereum",
-            watched_address="0x1234567890abcdef1234567890abcdef12345678",
-            block_number=100,
-            tx_count=1,
-            fail_count=0,
-            net_wei_change=1_000_000_000_000_000_000,  # +1 ETH
-            gas_fee_wei=0,
-        )]
-        msg = format_report(events, prices={"ethereum": 2500.0})
-        self.assertIn("+1.000000 ETH", msg)
-        self.assertIn("$+2500.00", msg)
-
-    def test_no_usd_when_price_none(self):
-        events = [TxEvent("ethereum", "0x1234567890abcdef1234567890abcdef12345678", 100, 1, 0, 1_000_000_000_000_000, 0)]
-        msg = format_report(events)
-        self.assertNotIn("$", msg)
-
-    def test_alphabetical_order(self):
+    def test_multiple_bots_sorted(self):
+        bots = {
+            "ethereum": make_bot("ethereum", tokens=[weth_token(), usdc_token()]),
+            "arbitrum": make_bot("arbitrum", tokens=[weth_token(ARB_WETH)]),
+        }
         events = [
-            TxEvent("z_bot", "0x1", 100, 1, 0, 1000, 100),
-            TxEvent("a_bot", "0x2", 100, 1, 0, 1000, 100),
-            TxEvent("m_bot", "0x3", 100, 1, 0, 1000, 100),
+            event("ethereum", net_by_token={normalize_address(USDC): 5_000_000}),
+            event("arbitrum", net_by_token={normalize_address(ARB_WETH): -10 ** 16}),
         ]
-        msg = format_report(events)
-        # Check order of appearances
-        pos_a = msg.find("A_BOT")
-        pos_m = msg.find("M_BOT")
-        pos_z = msg.find("Z_BOT")
-        self.assertTrue(pos_a < pos_m < pos_z, f"Order is wrong: A:{pos_a}, M:{pos_m}, Z:{pos_z}")
+        msg = format_report(events, bots_info=bots,
+                            prices={"usd-coin": 1.0, "ethereum": 2000.0})
+        pos_arb = msg.find("ARBITRUM")
+        pos_eth = msg.find("ETHEREUM")
+        self.assertTrue(0 <= pos_arb < pos_eth)
 
 
-class TestTelegramNotifierBatching(unittest.TestCase):
-    """Тесты логики батчинга уведомлений"""
+class TestBotInfo(unittest.TestCase):
+    def test_native_symbol(self):
+        self.assertEqual(make_bot(tokens=[weth_token(symbol="WETH")]).native_symbol, "ETH")
+        self.assertEqual(make_bot(tokens=[weth_token(symbol="WMON")]).native_symbol, "MON")
+        self.assertEqual(make_bot(tokens=[weth_token(symbol="ETH")]).native_symbol, "ETH")
 
-    def _make_event(self, bot="ethereum", net=1_000_000_000_000_000, gas=100_000_000_000_000):
-        return TxEvent(bot, "0x1234567890abcdef1234567890abcdef12345678", 100, 1, 0, net, gas)
+    def test_native_coingecko_id(self):
+        self.assertEqual(make_bot(tokens=[weth_token(coingecko_id="ethereum")]).native_coingecko_id,
+                         "ethereum")
 
-    def test_first_event_sends_immediately(self):
-        """Первое событие должно отправиться сразу (_last_sent == 0)"""
-        notifier = TelegramNotifier("token", "chat", notify_schedule="0 * * * *")
-        notifier._send = AsyncMock()
+    def test_coingecko_ids_collects_all(self):
+        bot = make_bot(tokens=[weth_token(), usdc_token()])
+        self.assertEqual(set(bot.coingecko_ids), {"ethereum", "usd-coin"})
 
-        asyncio.run(notifier.add_event(self._make_event()))
+    def test_refresh_balances(self):
+        eth_client = AsyncMock()
+        eth_client.get_balance = AsyncMock(return_value=10 ** 18)
+        eth_client.get_erc20_balance = AsyncMock(side_effect=[2 * 10 ** 18, 5_000_000])
+        bot = BotInfo(name="ethereum", watched_address=ADDR,
+                      tokens=[weth_token(), usdc_token()], eth_client=eth_client)
+        asyncio.run(bot.refresh_balances())
+        self.assertEqual(bot.native_balance_wei, 10 ** 18)
+        self.assertEqual(bot.balances[normalize_address(WETH)], 2 * 10 ** 18)
+        self.assertEqual(bot.balances[normalize_address(USDC)], 5_000_000)
 
-        notifier._send.assert_called_once()
 
-    def test_second_event_batched(self):
-        """После первой отправки события накапливаются до следующего cron-тика"""
-        notifier = TelegramNotifier("token", "chat", notify_schedule="0 * * * *")
-        notifier._last_sent = time.time()
-        notifier._send = AsyncMock()
-
-        asyncio.run(notifier.add_event(self._make_event()))
-
-        notifier._send.assert_not_called()
-        self.assertEqual(len(notifier._pending), 1)
-
-    def test_multiple_events_batched(self):
-        notifier = TelegramNotifier("token", "chat", notify_schedule="0 * * * *")
-        notifier._last_sent = time.time()
-        notifier._send = AsyncMock()
-
-        async def add_three():
-            await notifier.add_event(self._make_event())
-            await notifier.add_event(self._make_event())
-            await notifier.add_event(self._make_event())
-
-        asyncio.run(add_three())
-
-        notifier._send.assert_not_called()
-        self.assertEqual(len(notifier._pending), 3)
-
-    def test_force_flush_sends(self):
-        notifier = TelegramNotifier("token", "chat", notify_schedule="0 * * * *")
-        notifier._send = AsyncMock()
-        notifier._pending = [self._make_event(), self._make_event()]
-
-        asyncio.run(notifier.force_flush())
-
-        notifier._send.assert_called_once()
-        self.assertEqual(len(notifier._pending), 0)
-
-    def test_force_flush_empty_does_nothing(self):
-        notifier = TelegramNotifier("token", "chat", notify_schedule="0 * * * *")
-        notifier._send = AsyncMock()
-
-        asyncio.run(notifier.force_flush())
-
-        notifier._send.assert_not_called()
-
-    def test_flush_updates_last_sent(self):
-        notifier = TelegramNotifier("token", "chat", notify_schedule="0 * * * *")
-        notifier._send = AsyncMock()
-
-        before = time.time()
-        asyncio.run(notifier.add_event(self._make_event()))
-        after = time.time()
-
-        self.assertGreaterEqual(notifier._last_sent, before)
-        self.assertLessEqual(notifier._last_sent, after)
-
-    def test_startup_message(self):
+class TestStartupMessage(unittest.TestCase):
+    def test_startup_basic(self):
         notifier = TelegramNotifier("token", "chat", notify_schedule="*/30 * * * *")
         notifier._send = AsyncMock()
-
-        notifier.register_bot(BotInfo(
-            name="ethereum",
-            watched_address="0xc0c9c680a96cf92604a94cff927c0ad674450191",
-            token_address="0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-            token_symbol="WETH",
-        ))
-        notifier.register_bot(BotInfo(
-            name="arbitrum",
-            watched_address="0x0000000000DeAdBeEf00112233445566778899aA",
-            token_address="0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
-            token_symbol="WETH",
-        ))
+        notifier.register_bot(make_bot("ethereum", watched="0xcccccccccccccccccccccccccccccccccccccccc"))
+        notifier.register_bot(make_bot("arbitrum", tokens=[weth_token(ARB_WETH)],
+                                       watched="0x0000000000DeAdBeEf00112233445566778899aA"))
         asyncio.run(notifier.send_startup_message())
 
         notifier._send.assert_called_once()
@@ -210,99 +152,79 @@ class TestTelegramNotifierBatching(unittest.TestCase):
         self.assertIn("ethereum", msg)
         self.assertIn("arbitrum", msg)
         self.assertIn("*/30 * * * *", msg)
-        self.assertIn("0xc0c9c680a96cf92604a94cff927c0ad674450191", msg)
         self.assertIn("WETH", msg)
 
-    def test_startup_message_with_balance(self):
-        """Выводит суммарный баланс (native + wrapped) в нативном тикере"""
-        notifier = TelegramNotifier("token", "chat", notify_schedule="0 * * * *")
-        notifier._send = AsyncMock()
-
-        notifier.register_bot(BotInfo(
-            name="ethereum",
-            watched_address="0xc0c9c680a96cf92604a94cff927c0ad674450191",
-            token_address="0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-            token_symbol="WETH",
-            total_balance_wei=1_234_500_000_000_000_000,  # 1.2345 ETH
-        ))
-        asyncio.run(notifier.send_startup_message())
-
-        msg = notifier._send.call_args[0][0]
-        self.assertIn("1.2345 ETH", msg)
-        self.assertIn("Balance", msg)
-        # Без цены USD-части быть не должно
-        self.assertNotIn("$", msg.split("Balance")[1].split("\n")[0])
-
-    def test_startup_message_balance_with_usd(self):
-        """Если есть coingecko_id и cg_client, рядом с балансом показывается USD"""
+    def test_startup_balances_with_usd(self):
         cg_client = AsyncMock()
-        cg_client.get_prices_usd = AsyncMock(return_value={"ethereum": 2000.0})
-
-        notifier = TelegramNotifier("token", "chat", notify_schedule="0 * * * *",
-                                    cg_client=cg_client)
+        cg_client.get_prices_usd = AsyncMock(return_value={"ethereum": 2000.0, "usd-coin": 1.0})
+        notifier = TelegramNotifier("token", "chat", notify_schedule="0 * * * *", cg_client=cg_client)
         notifier._send = AsyncMock()
-        notifier.register_bot(BotInfo(
-            name="ethereum",
-            watched_address="0xc0c9c680a96cf92604a94cff927c0ad674450191",
-            token_address="0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-            token_symbol="WETH",
-            coingecko_id="ethereum",
-            total_balance_wei=1_500_000_000_000_000_000,  # 1.5 ETH
+        notifier.register_bot(make_bot(
+            "ethereum",
+            tokens=[weth_token(), usdc_token()],
+            native_balance=1_500_000_000_000_000_000,
+            balances={normalize_address(WETH): 0, normalize_address(USDC): 1_000_000_000},
+            watched="0xcccccccccccccccccccccccccccccccccccccccc",
         ))
         asyncio.run(notifier.send_startup_message())
-
         msg = notifier._send.call_args[0][0]
-        self.assertIn("1.5000 ETH", msg)
+        self.assertIn("ETH: 1.5000", msg)
         self.assertIn("$3,000.00", msg)
+        self.assertIn("USDC: 1000.0000", msg)
+        self.assertIn("$2,000.00", msg)  # WETH header price
 
-    def test_native_symbol_strips_w_prefix(self):
-        self.assertEqual(BotInfo("b", "a", "t", token_symbol="WETH").native_symbol, "ETH")
-        self.assertEqual(BotInfo("b", "a", "t", token_symbol="WMON").native_symbol, "MON")
-        self.assertEqual(BotInfo("b", "a", "t", token_symbol="ETH").native_symbol, "ETH")
-        self.assertEqual(BotInfo("b", "a", "t", token_symbol="W").native_symbol, "W")
-
-    def test_startup_message_with_price(self):
-        """Если для бота задан coingecko_id и CoinGecko клиент, в приветствии будет цена"""
-        cg_client = AsyncMock()
-        cg_client.get_prices_usd = AsyncMock(return_value={"ethereum": 3210.5})
-
-        notifier = TelegramNotifier("token", "chat", notify_schedule="0 * * * *",
-                                    cg_client=cg_client)
-        notifier._send = AsyncMock()
-
-        notifier.register_bot(BotInfo(
-            name="ethereum",
-            watched_address="0xc0c9c680a96cf92604a94cff927c0ad674450191",
-            token_address="0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-            token_symbol="WETH",
-            coingecko_id="ethereum",
-        ))
-        asyncio.run(notifier.send_startup_message())
-
-        msg = notifier._send.call_args[0][0]
-        self.assertIn("WETH", msg)
-        self.assertIn("$3,210.50", msg)
-        cg_client.get_prices_usd.assert_awaited_once()
-
-    def test_startup_message_alphabetical_order(self):
+    def test_startup_alphabetical_order(self):
         notifier = TelegramNotifier("token", "chat", notify_schedule="0 * * * *")
         notifier._send = AsyncMock()
-
-        names = ["z_bot", "a_bot", "m_bot"]
-        for name in names:
-            notifier.register_bot(BotInfo(
-                name=name,
-                watched_address="0x1",
-                token_address="0x2",
-                token_symbol="ETH",
-            ))
-
+        for name in ["z_bot", "a_bot", "m_bot"]:
+            notifier.register_bot(make_bot(name, watched="0x1"))
         asyncio.run(notifier.send_startup_message())
         msg = notifier._send.call_args[0][0]
         pos_a = msg.find("*a_bot*")
         pos_m = msg.find("*m_bot*")
         pos_z = msg.find("*z_bot*")
-        self.assertTrue(pos_a < pos_m < pos_z, f"Order is wrong in startup: A:{pos_a}, M:{pos_m}, Z:{pos_z}")
+        self.assertTrue(pos_a < pos_m < pos_z)
+
+
+class TestTelegramNotifierBatching(unittest.TestCase):
+    """Логика батчинга уведомлений (поведение не изменилось)"""
+
+    def test_first_event_sends_immediately(self):
+        notifier = TelegramNotifier("token", "chat", notify_schedule="0 * * * *")
+        notifier._send = AsyncMock()
+        asyncio.run(notifier.add_event(event()))
+        notifier._send.assert_called_once()
+
+    def test_second_event_batched(self):
+        notifier = TelegramNotifier("token", "chat", notify_schedule="0 * * * *")
+        notifier._last_sent = time.time()
+        notifier._send = AsyncMock()
+        asyncio.run(notifier.add_event(event()))
+        notifier._send.assert_not_called()
+        self.assertEqual(len(notifier._pending), 1)
+
+    def test_force_flush_sends(self):
+        notifier = TelegramNotifier("token", "chat", notify_schedule="0 * * * *")
+        notifier._send = AsyncMock()
+        notifier._pending = [event(), event()]
+        asyncio.run(notifier.force_flush())
+        notifier._send.assert_called_once()
+        self.assertEqual(len(notifier._pending), 0)
+
+    def test_force_flush_empty_does_nothing(self):
+        notifier = TelegramNotifier("token", "chat", notify_schedule="0 * * * *")
+        notifier._send = AsyncMock()
+        asyncio.run(notifier.force_flush())
+        notifier._send.assert_not_called()
+
+    def test_flush_updates_last_sent(self):
+        notifier = TelegramNotifier("token", "chat", notify_schedule="0 * * * *")
+        notifier._send = AsyncMock()
+        before = time.time()
+        asyncio.run(notifier.add_event(event()))
+        after = time.time()
+        self.assertGreaterEqual(notifier._last_sent, before)
+        self.assertLessEqual(notifier._last_sent, after)
 
     def test_seconds_until_next(self):
         notifier = TelegramNotifier("token", "chat", notify_schedule="* * * * *")
@@ -312,24 +234,21 @@ class TestTelegramNotifierBatching(unittest.TestCase):
 
 
 class TestTxEvent(unittest.TestCase):
-    """Тесты TxEvent"""
-
     def test_default_timestamp(self):
         before = time.time()
-        event = TxEvent("ethereum", "0x1234567890abcdef1234567890abcdef12345678", 100, 1, 0, 1000, 500)
+        e = event()
         after = time.time()
-        self.assertGreaterEqual(event.timestamp, before)
-        self.assertLessEqual(event.timestamp, after)
+        self.assertGreaterEqual(e.timestamp, before)
+        self.assertLessEqual(e.timestamp, after)
 
     def test_fields(self):
-        event = TxEvent("arbitrum", "0xabcdef1234567890abcdef1234567890abcdef12", 200, 3, 1, -500, 300)
-        self.assertEqual(event.bot_name, "arbitrum")
-        self.assertEqual(event.watched_address, "0xabcdef1234567890abcdef1234567890abcdef12")
-        self.assertEqual(event.block_number, 200)
-        self.assertEqual(event.tx_count, 3)
-        self.assertEqual(event.fail_count, 1)
-        self.assertEqual(event.net_wei_change, -500)
-        self.assertEqual(event.gas_fee_wei, 300)
+        net = {normalize_address(USDC): -500}
+        e = TxEvent("arbitrum", "0xabc", 200, 3, 1, net, 300)
+        self.assertEqual(e.bot_name, "arbitrum")
+        self.assertEqual(e.tx_count, 3)
+        self.assertEqual(e.fail_count, 1)
+        self.assertEqual(e.net_by_token, net)
+        self.assertEqual(e.gas_fee_wei, 300)
 
 
 if __name__ == "__main__":
