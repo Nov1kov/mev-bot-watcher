@@ -25,11 +25,12 @@ def usdc_token():
 
 
 def make_bot(name="ethereum", tokens=None, native_balance=None, balances=None,
-             watched=ADDR):
+             watched=ADDR, scanner_url=None):
     if tokens is None:
         tokens = [weth_token()]
     return BotInfo(name=name, watched_address=watched, tokens=tokens,
-                   native_balance_wei=native_balance, balances=balances or {})
+                   native_balance_wei=native_balance, balances=balances or {},
+                   scanner_url=scanner_url)
 
 
 def event(bot="ethereum", net_by_token=None, gas=0, tx_count=1, fail_count=0,
@@ -127,6 +128,52 @@ class TestFormatReport(unittest.TestCase):
         pos_arb = msg.find("ARBITRUM")
         pos_eth = msg.find("ETHEREUM")
         self.assertTrue(0 <= pos_arb < pos_eth)
+
+
+class TestAddressLink(unittest.TestCase):
+    """Кликабельная ссылка на сканер для адреса бота"""
+
+    def test_address_link_with_trailing_slash(self):
+        bot = make_bot(scanner_url="https://etherscan.io/")
+        link = bot.address_link("0x1234...5678")
+        self.assertEqual(link, f"[0x1234...5678](https://etherscan.io/address/{bot.watched_address})")
+
+    def test_address_link_without_trailing_slash(self):
+        bot = make_bot(scanner_url="https://arbiscan.io")
+        link = bot.address_link("0x1234...5678")
+        self.assertEqual(link, f"[0x1234...5678](https://arbiscan.io/address/{bot.watched_address})")
+
+    def test_address_link_slash_variants_match(self):
+        """С '/' на конце и без него результат должен совпадать."""
+        addr = "0xcccccccccccccccccccccccccccccccccccccccc"
+        with_slash = make_bot(scanner_url="https://etherscan.io/", watched=addr)
+        without_slash = make_bot(scanner_url="https://etherscan.io", watched=addr)
+        self.assertEqual(with_slash.address_link("x"), without_slash.address_link("x"))
+
+    def test_address_link_preserves_path_prefix(self):
+        bot = make_bot(scanner_url="https://explorer.example.com/eth")
+        self.assertIn("https://explorer.example.com/eth/address/", bot.address_link("addr"))
+
+    def test_address_link_without_scanner_falls_back_to_backticks(self):
+        bot = make_bot(scanner_url=None)
+        self.assertEqual(bot.address_link("0x1234...5678"), "`0x1234...5678`")
+
+    def test_report_uses_scanner_link(self):
+        bots = {"ethereum": make_bot(tokens=[weth_token(), usdc_token()],
+                                     scanner_url="https://etherscan.io/")}
+        events = [event(net_by_token={normalize_address(USDC): 5_000_000})]
+        msg = format_report(events, bots_info=bots, prices={"usd-coin": 1.0, "ethereum": 2500.0})
+        self.assertIn(f"[0x1234...5678](https://etherscan.io/address/{normalize_address(ADDR)})", msg)
+
+    def test_startup_uses_scanner_link(self):
+        notifier = TelegramNotifier("token", "chat", notify_schedule="0 * * * *")
+        notifier._send = AsyncMock()
+        bot = make_bot("ethereum", watched="0xcccccccccccccccccccccccccccccccccccccccc",
+                       scanner_url="https://etherscan.io/")
+        notifier.register_bot(bot)
+        asyncio.run(notifier.send_startup_message())
+        msg = notifier._send.call_args[0][0]
+        self.assertIn(f"https://etherscan.io/address/{bot.watched_address}", msg)
 
 
 class TestBotInfo(unittest.TestCase):

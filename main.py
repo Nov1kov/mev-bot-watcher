@@ -167,6 +167,7 @@ def monitor(config: str, bot_name: Optional[str] = None):
         for name, bot_cfg in bots_to_monitor.items():
             wrapped, base = get_token_addresses(bot_cfg)
             watched_address = bot_cfg['watched_address'].lower()
+            scanner_url = bot_cfg.get('scanner_url')
             ws_url, ws_login, ws_password = parse_ws_rpc(bot_cfg.get('ws_rpc_url'))
             http_rpc_url = bot_cfg.get('http_rpc_url')
 
@@ -182,7 +183,8 @@ def monitor(config: str, bot_name: Optional[str] = None):
             eth_clients.append(eth_client)
 
             tokens = await build_tokens(eth_client, cg_client, wrapped, base)
-            bot_info = await BotInfo.from_rpc(eth_client, name, watched_address, tokens)
+            bot_info = await BotInfo.from_rpc(eth_client, name, watched_address, tokens,
+                                              scanner_url=scanner_url)
 
             if notifier:
                 notifier.register_bot(bot_info)

@@ -16,7 +16,7 @@ Scans historical blocks or subscribes to new ones via WebSocket, finds transacti
 - **Retrospective analysis** — scan a range of blocks, calculate profit per block and total summary
 - **Realtime monitoring** — subscribe to new blocks via WebSocket
 - **Multichain** — multiple networks via config (Ethereum, Arbitrum, etc.)
-- **Telegram notifications** — aggregated reports with configurable interval, USD profit and per-token balances
+- **Telegram notifications** — aggregated reports with configurable interval, USD profit and per-token balances; bot addresses can link to a block explorer via `scanner_url`
 
 ## Configuration
 
@@ -39,6 +39,10 @@ bots:
       - '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'   # USDC
       - '0xdAC17F958D2ee523a2206206994597C13D831ec7'   # USDT
     watched_address: '0xYOUR_BOT_ADDRESS'
+    # scanner_url (optional) — base URL of the network block explorer. Used to
+    # turn the bot address in Telegram notifications into a clickable link.
+    # Examples: ethereum — https://etherscan.io/, arbitrum — https://arbiscan.io/
+    scanner_url: 'https://etherscan.io/'
     http_rpc_url: 'https://your-rpc-provider.com/api-key'
     ws_rpc_url: 'wss://your-rpc-provider.com/api-key'
 ```
@@ -46,6 +50,11 @@ bots:
 Token `symbol`/`decimals` are read from each contract over RPC, and the USD price
 is auto-resolved via CoinGecko by symbol. For tokens that are not the wrapped
 native token, `base_tokens` is optional — omit it for single-token bots.
+
+`scanner_url` is optional too: when set, the bot address in Telegram messages
+becomes a clickable link to its page on the block explorer (e.g.
+`https://etherscan.io/address/0x...`); when omitted, the address is shown as
+plain monospace text.
 
 ### WebSocket with Basic Auth
 
@@ -75,7 +84,6 @@ Startup message. Per-token balances are fetched via RPC (native `eth_getBalance`
   0xYOUR_BOT_ADDRESS
   💰 Balance:
   ETH: 1.5000 ($4,815.75)
-  WETH: 0.0000 ($0.00)
   USDC: 1000.0000 ($1,000.00)
 
 ⏰ Schedule: 0 * * * *

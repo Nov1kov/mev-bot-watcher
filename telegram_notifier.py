@@ -4,6 +4,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Dict, Optional, Iterable, Any
+from urllib.parse import urljoin
 
 import aiohttp
 from croniter import croniter
@@ -37,6 +38,8 @@ class BotInfo:
     нативного токена, её цена используется для оценки газа.
     balances — текущие raw-балансы по token_address; native_balance_wei —
     нативный баланс (для газа). Обновляются через refresh_balances().
+    scanner_url — базовый URL блок-эксплорера (например https://etherscan.io/);
+    если задан, адрес бота в уведомлениях становится кликабельной ссылкой.
     """
     name: str
     watched_address: str
@@ -44,9 +47,24 @@ class BotInfo:
     eth_client: Any = None
     native_balance_wei: Optional[int] = None
     balances: Dict[str, int] = field(default_factory=dict)
+    scanner_url: Optional[str] = None
 
     def __post_init__(self):
         self.watched_address = normalize_address(self.watched_address)
+
+    def address_link(self, text: str) -> str:
+        """Адрес как кликабельная Markdown-ссылка на сканер, иначе — в backticks.
+
+        text — отображаемая подпись (полный или сокращённый адрес).
+        scanner_url принимается как с завершающим '/', так и без него.
+        """
+        if self.scanner_url:
+            # Гарантируем завершающий '/', чтобы urljoin дописывал путь,
+            # а не заменял последний сегмент базового URL.
+            base = self.scanner_url if self.scanner_url.endswith('/') else self.scanner_url + '/'
+            url = urljoin(base, f"address/{self.watched_address}")
+            return f"[{text}]({url})"
+        return f"`{text}`"
 
     @property
     def wrapped(self) -> Optional[TokenInfo]:
@@ -72,10 +90,11 @@ class BotInfo:
 
     @classmethod
     async def from_rpc(cls, eth_client, name: str, watched_address: str,
-                       tokens: List[TokenInfo]) -> "BotInfo":
+                       tokens: List[TokenInfo],
+                       scanner_url: Optional[str] = None) -> "BotInfo":
         """Создаёт BotInfo и подтягивает текущие балансы по RPC."""
         info = cls(name=name, watched_address=watched_address,
-                   tokens=tokens, eth_client=eth_client)
+                   tokens=tokens, eth_client=eth_client, scanner_url=scanner_url)
         await info.refresh_balances()
         return info
 
@@ -201,6 +220,7 @@ class TelegramNotifier:
             "chat_id": self.chat_id,
             "text": text,
             "parse_mode": "Markdown",
+            "disable_web_page_preview": True,
         }
         try:
             async with aiohttp.ClientSession() as session:
@@ -224,7 +244,7 @@ class TelegramNotifier:
             native_price = prices.get(info.native_coingecko_id) if info.native_coingecko_id else None
             price_str = f" — ${native_price:,.2f}" if native_price else ""
             lines.append(f"• *{name}* ({symbol}{price_str})")
-            lines.append(f"  `{info.watched_address}`")
+            lines.append(f"  {info.address_link(info.watched_address)}")
             balance_lines = _format_balance_lines(info, prices)
             if balance_lines:
                 lines.append("  \U0001f4b0 Balance:")
@@ -289,7 +309,10 @@ def format_report(events: List[TxEvent],
         short_addr = f"{addr[:6]}...{addr[-4:]}"
 
         lines.append(f"{emoji} *{bot_name.upper()}*")
-        lines.append(f"`{short_addr}`")
+        if info is not None:
+            lines.append(info.address_link(short_addr))
+        else:
+            lines.append(f"`{short_addr}`")
         lines.append(f"├ Successful txs: {successful}/{total_txs}")
         if profit_usd is not None:
             lines.append(f"└ Total: `${profit_usd:+,.2f}`")

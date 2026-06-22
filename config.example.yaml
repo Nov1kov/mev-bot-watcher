@@ -19,12 +19,18 @@ bots:
       - '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'   # USDC
       - '0xdAC17F958D2ee523a2206206994597C13D831ec7'   # USDT
     watched_address: '0xYOUR_BOT_ADDRESS'
+    # scanner_url (опционально) — базовый URL блок-эксплорера сети. Используется,
+    # чтобы адрес бота в Telegram-уведомлениях стал кликабельной ссылкой вместо
+    # простого текста. Примеры: ethereum — https://etherscan.io/,
+    # arbitrum — https://arbiscan.io/
+    scanner_url: 'https://etherscan.io/'
     http_rpc_url: 'https://your-rpc-provider.com/api-key'
     ws_rpc_url: 'wss://your-rpc-provider.com/api-key'
 
   arbitrum:
     wrapped_token: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1'
     watched_address: '0xYOUR_BOT_ADDRESS'
+    scanner_url: 'https://arbiscan.io/'
     http_rpc_url: 'https://your-rpc-provider.com/api-key'
     ws_rpc_url: 'ws://your-node-ip:8550'
 
