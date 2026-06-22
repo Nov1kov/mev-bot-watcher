@@ -85,6 +85,24 @@ class TestFormatReport(unittest.TestCase):
         self.assertIn("USDC: 1000.0000", msg)
         self.assertIn("$3,000.00", msg)  # 1.5 ETH × 2000
 
+    def test_balances_hide_zero(self):
+        """Строки с балансом, округляемым до 0.0000, не выводятся."""
+        dai = TokenInfo("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "DAI", 18, "dai")
+        bots = {"ethereum": make_bot(
+            tokens=[weth_token(), usdc_token(), dai],
+            native_balance=0,  # ETH 0.0000 → скрыть
+            balances={normalize_address(WETH): 73_900_000_000_000_000,  # 0.0739 WETH
+                      normalize_address(USDC): 9_310_000,               # 9.31 USDC
+                      normalize_address(dai.address): 0},               # DAI 0.0000 → скрыть
+        )}
+        events = [event(net_by_token={normalize_address(USDC): 1_000_000})]
+        msg = format_report(events, bots_info=bots,
+                            prices={"usd-coin": 1.0, "ethereum": 2000.0, "dai": 1.0})
+        self.assertIn("WETH: 0.0739", msg)
+        self.assertIn("USDC: 9.3100", msg)
+        self.assertNotIn("ETH: 0.0000", msg)
+        self.assertNotIn("DAI:", msg)
+
     def test_aggregation_same_bot(self):
         bots = {"ethereum": make_bot(tokens=[weth_token(), usdc_token()])}
         events = [

@@ -109,14 +109,17 @@ def _format_balance_lines(info: BotInfo, prices: Optional[Dict[str, float]]) -> 
     lines: List[str] = []
     if info.native_balance_wei is not None:
         native_amount = info.native_balance_wei / 1e18
-        price = prices.get(info.native_coingecko_id) if info.native_coingecko_id else None
-        lines.append(f"  `{info.native_symbol}: {native_amount:.4f}"
-                     f"{_usd_suffix(native_amount, price)}`")
+        if round(native_amount, 4) != 0:
+            price = prices.get(info.native_coingecko_id) if info.native_coingecko_id else None
+            lines.append(f"  `{info.native_symbol}: {native_amount:.4f}"
+                         f"{_usd_suffix(native_amount, price)}`")
     for token in info.tokens:
         raw = info.balances.get(token.address)
         if raw is None:
             continue
         amount = raw / 10 ** token.decimals
+        if round(amount, 4) == 0:
+            continue
         price = prices.get(token.coingecko_id) if token.coingecko_id else None
         lines.append(f"  `{token.symbol}: {amount:.4f}{_usd_suffix(amount, price)}`")
     return lines
