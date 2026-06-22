@@ -1,0 +1,28 @@
+# gitleaks ignore list — false positives only.
+# Format: <commit>:<file>:<rule>:<line>
+#
+# None of the entries below are real secrets:
+#   * public ERC20 token contract addresses used in docs/config/tests
+#     (WETH on Ethereum 0xC02a...756Cc2, WETH on Arbitrum 0x82aF...3fBab1);
+#   * one dummy password fixture in a unit test (Basic-auth encoding test).
+# They trip the generic-api-key rule purely on hex/string entropy.
+
+# Public WETH contract addresses (Ethereum + Arbitrum) in docs and config example
+09205f6adacd6c198687e8c1212b3e2f408cef31:README.md:generic-api-key:35
+09205f6adacd6c198687e8c1212b3e2f408cef31:README.ru.md:generic-api-key:35
+09205f6adacd6c198687e8c1212b3e2f408cef31:config.example.yaml:generic-api-key:15
+09205f6adacd6c198687e8c1212b3e2f408cef31:config.example.yaml:generic-api-key:26
+aaf997c70b41f9ee739511bd03734469dfa219c9:config.example.yaml:generic-api-key:10
+aaf997c70b41f9ee739511bd03734469dfa219c9:config.example.yaml:generic-api-key:17
+cd05d34d4ee7dad8e1d8831527c207133aa620fb:README.md:generic-api-key:33
+cd05d34d4ee7dad8e1d8831527c207133aa620fb:README.ru.md:generic-api-key:33
+
+# Public WETH contract addresses used as test fixtures
+119671e8ca25f82273fe97ecf9a3e8602cf20752:tests/test_telegram_notifier.py:generic-api-key:183
+119671e8ca25f82273fe97ecf9a3e8602cf20752:tests/test_telegram_notifier.py:generic-api-key:189
+119671e8ca25f82273fe97ecf9a3e8602cf20752:tests/test_telegram_notifier.py:generic-api-key:215
+5347d039fb7235736fa92a7a197ef8c3a8012f87:tests/test_telegram_notifier.py:generic-api-key:211
+5347d039fb7235736fa92a7a197ef8c3a8012f87:tests/test_telegram_notifier.py:generic-api-key:234
+
+# Dummy password fixture in WebSocket Basic-auth unit test
+97972154822141ba25a912cb5880cab117f99141:tests/test_ws_connector.py:generic-api-key:62
