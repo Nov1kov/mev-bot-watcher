@@ -17,6 +17,7 @@ Scans historical blocks or subscribes to new ones via WebSocket, finds transacti
 - **Realtime monitoring** — subscribe to new blocks via WebSocket
 - **Multichain** — multiple networks via config (Ethereum, Arbitrum, etc.)
 - **Telegram notifications** — aggregated reports with configurable interval, USD profit and per-token balances; bot addresses can link to a block explorer via `scanner_url`
+- **Instant loss alerts** — optional per-network `loss_alert_usd`: as soon as a block turns out unprofitable, a separate message is sent with links to the offending transactions
 
 ## Configuration
 
@@ -43,6 +44,9 @@ bots:
     # turn the bot address in Telegram notifications into a clickable link.
     # Examples: ethereum — https://etherscan.io/, arbitrum — https://arbiscan.io/
     scanner_url: 'https://etherscan.io/'
+    # loss_alert_usd (optional) — send an instant alert as soon as a block's P&L
+    # in this network is below -$loss_alert_usd. Omit to disable, 0 for any loss.
+    loss_alert_usd: 1.0
     http_rpc_url: 'https://your-rpc-provider.com/api-key'
     ws_rpc_url: 'wss://your-rpc-provider.com/api-key'
 ```
@@ -103,6 +107,36 @@ send time:
   ETH: 1.4980 ($4,809.32)
   USDC: 1001.7200 ($1,001.72)
 ```
+
+### Instant loss alerts
+
+`loss_alert_usd` is set per network, next to that bot's `watched_address` — so
+you can alert on any loss on a cheap L2 and only on large ones on mainnet, or
+leave it out entirely for networks you don't want alerts for.
+
+When it is set, every block containing transactions of the watched address is
+priced right after it is read. If its P&L (token balance changes minus gas) is
+below `-loss_alert_usd`, a separate message is sent immediately — without
+waiting for the next scheduled report. The block still counts towards the
+periodic report as usual.
+
+Transaction hashes link to the block explorer when `scanner_url` is configured
+(otherwise they are shown as plain monospace text). A block may contain several
+transactions of the bot — all of them are listed:
+```
+🚨 LOSS — ETHEREUM $-10.12
+0x1234...5678
+├ Block: 21500123
+├ Txs: 2 (failed: 1)
+├ WETH: -0.004200 ($-10.50)
+├ USDC: +1.500000 ($+1.50)
+└ Gas: 0.001500 ETH ($3.75)
+🔗 0xaa1111...111111, 0xbb2222...222222
+```
+
+`loss_alert_usd: 0` alerts on any loss; a higher value (e.g. `5`) filters out
+noise from cheap failed transactions. USD prices are cached for a minute, so
+frequent blocks do not hammer the CoinGecko API.
 
 ## Usage
 

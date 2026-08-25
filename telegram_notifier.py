@@ -13,6 +13,11 @@ from coingecko_client import CoinGeckoClient
 from tx_analyzer import TokenInfo, normalize_address, compute_profit_usd_for
 
 
+# Цены кешируются на минуту: при включённых мгновенных алертах запрос цен
+# иначе уходил бы на каждом блоке с транзакциями бота.
+PRICE_CACHE_TTL = 60.0
+
+
 @dataclass
 class TxEvent:
     """Событие транзакции для уведомления.
@@ -27,6 +32,7 @@ class TxEvent:
     fail_count: int
     net_by_token: Dict[str, int]
     gas_fee_wei: int
+    tx_hashes: List[str] = field(default_factory=list)
     timestamp: float = field(default_factory=time.time)
 
 
@@ -40,6 +46,8 @@ class BotInfo:
     нативный баланс (для газа). Обновляются через refresh_balances().
     scanner_url — базовый URL блок-эксплорера (например https://etherscan.io/);
     если задан, адрес бота в уведомлениях становится кликабельной ссылкой.
+    loss_alert_usd — порог мгновенного алерта об убытке (USD) для этой сети;
+    None — алерты выключены.
     """
     name: str
     watched_address: str
@@ -48,23 +56,31 @@ class BotInfo:
     native_balance_wei: Optional[int] = None
     balances: Dict[str, int] = field(default_factory=dict)
     scanner_url: Optional[str] = None
+    loss_alert_usd: Optional[float] = None
 
     def __post_init__(self):
         self.watched_address = normalize_address(self.watched_address)
 
-    def address_link(self, text: str) -> str:
-        """Адрес как кликабельная Markdown-ссылка на сканер, иначе — в backticks.
+    def scanner_link(self, path: str, text: str) -> str:
+        """Markdown-ссылка на страницу сканера, иначе — текст в backticks.
 
-        text — отображаемая подпись (полный или сокращённый адрес).
+        path — путь внутри сканера (address/0x..., tx/0x...).
         scanner_url принимается как с завершающим '/', так и без него.
         """
         if self.scanner_url:
             # Гарантируем завершающий '/', чтобы urljoin дописывал путь,
             # а не заменял последний сегмент базового URL.
             base = self.scanner_url if self.scanner_url.endswith('/') else self.scanner_url + '/'
-            url = urljoin(base, f"address/{self.watched_address}")
-            return f"[{text}]({url})"
+            return f"[{text}]({urljoin(base, path)})"
         return f"`{text}`"
+
+    def address_link(self, text: str) -> str:
+        """Адрес бота как ссылка на сканер (text — полный или сокращённый адрес)."""
+        return self.scanner_link(f"address/{self.watched_address}", text)
+
+    def tx_link(self, tx_hash: str) -> str:
+        """Хеш транзакции как ссылка на сканер, подпись — сокращённый хеш."""
+        return self.scanner_link(f"tx/{tx_hash}", f"{tx_hash[:8]}...{tx_hash[-6:]}")
 
     @property
     def wrapped(self) -> Optional[TokenInfo]:
@@ -91,10 +107,12 @@ class BotInfo:
     @classmethod
     async def from_rpc(cls, eth_client, name: str, watched_address: str,
                        tokens: List[TokenInfo],
-                       scanner_url: Optional[str] = None) -> "BotInfo":
+                       scanner_url: Optional[str] = None,
+                       loss_alert_usd: Optional[float] = None) -> "BotInfo":
         """Создаёт BotInfo и подтягивает текущие балансы по RPC."""
         info = cls(name=name, watched_address=watched_address,
-                   tokens=tokens, eth_client=eth_client, scanner_url=scanner_url)
+                   tokens=tokens, eth_client=eth_client, scanner_url=scanner_url,
+                   loss_alert_usd=loss_alert_usd)
         await info.refresh_balances()
         return info
 
@@ -153,6 +171,7 @@ class TelegramNotifier:
         self.chat_id = chat_id
         self.notify_schedule = notify_schedule
         self.cg_client = cg_client
+        self._price_cache: Dict[frozenset, tuple] = {}
         self._pending: List[TxEvent] = []
         self._last_sent: float = 0.0
         self._lock = asyncio.Lock()
@@ -171,8 +190,21 @@ class TelegramNotifier:
         """Добавить событие. Отправит сразу если это первое событие."""
         async with self._lock:
             self._pending.append(event)
+            await self._maybe_alert_loss(event)
             if self._last_sent == 0.0:
                 await self._flush()
+
+    async def _maybe_alert_loss(self, event: TxEvent):
+        """Мгновенный алерт, если блок убыточнее порога loss_alert_usd этой сети."""
+        info = self.bots.get(event.bot_name)
+        if info is None or info.loss_alert_usd is None:
+            return
+        prices = await self._fetch_prices([event.bot_name])
+        profit_usd = compute_profit_usd_for(info.tokens, info.native_coingecko_id,
+                                            event.net_by_token, event.gas_fee_wei, prices)
+        if profit_usd is None or profit_usd >= -info.loss_alert_usd:
+            return
+        await self._send(format_loss_alert(event, info, profit_usd, prices))
 
     async def force_flush(self):
         """Принудительная отправка накопленных событий"""
@@ -190,11 +222,17 @@ class TelegramNotifier:
                 ids.update(info.coingecko_ids)
         if not ids:
             return {}
+        key = frozenset(ids)
+        cached = self._price_cache.get(key)
+        if cached and time.time() - cached[0] < PRICE_CACHE_TTL:
+            return cached[1]
         try:
-            return await self.cg_client.get_prices_usd(ids)
+            prices = await self.cg_client.get_prices_usd(ids)
         except Exception:
             logging.exception("Failed to fetch prices from CoinGecko")
-            return {}
+            return cached[1] if cached else {}
+        self._price_cache[key] = (time.time(), prices)
+        return prices
 
     async def _refresh_balances(self, bot_names: Iterable[str]):
         for name in bot_names:
@@ -326,4 +364,31 @@ def format_report(events: List[TxEvent],
                 lines.extend(balance_lines)
         lines.append("")
 
+    return "\n".join(lines)
+
+
+def format_loss_alert(event: TxEvent, info: BotInfo, profit_usd: float,
+                      prices: Optional[Dict[str, float]] = None) -> str:
+    """Мгновенное уведомление об убыточном блоке со ссылками на транзакции."""
+    prices = prices or {}
+    addr = event.watched_address
+    lines = [
+        f"🚨 *LOSS* — *{info.name.upper()}* `${profit_usd:+,.2f}`",
+        info.address_link(f"{addr[:6]}...{addr[-4:]}"),
+        f"├ Block: `{event.block_number}`",
+        f"├ Txs: {event.tx_count} (failed: {event.fail_count})",
+    ]
+    for token in info.tokens:
+        net = event.net_by_token.get(token.address, 0)
+        if net == 0:
+            continue
+        amount = net / 10 ** token.decimals
+        price = prices.get(token.coingecko_id) if token.coingecko_id else None
+        lines.append(f"├ {token.symbol}: `{amount:+.6f}{_usd_suffix(amount, price, signed=True)}`")
+    gas_eth = event.gas_fee_wei / 1e18
+    native_price = prices.get(info.native_coingecko_id) if info.native_coingecko_id else None
+    lines.append(f"└ Gas: `{gas_eth:.6f} {info.native_symbol}"
+                 f"{_usd_suffix(gas_eth, native_price)}`")
+    if event.tx_hashes:
+        lines.append("🔗 " + ", ".join(info.tx_link(h) for h in event.tx_hashes))
     return "\n".join(lines)

@@ -168,6 +168,7 @@ def monitor(config: str, bot_name: Optional[str] = None):
             wrapped, base = get_token_addresses(bot_cfg)
             watched_address = bot_cfg['watched_address'].lower()
             scanner_url = bot_cfg.get('scanner_url')
+            loss_alert_usd = bot_cfg.get('loss_alert_usd')
             ws_url, ws_login, ws_password = parse_ws_rpc(bot_cfg.get('ws_rpc_url'))
             http_rpc_url = bot_cfg.get('http_rpc_url')
 
@@ -184,7 +185,10 @@ def monitor(config: str, bot_name: Optional[str] = None):
 
             tokens = await build_tokens(eth_client, cg_client, wrapped, base)
             bot_info = await BotInfo.from_rpc(eth_client, name, watched_address, tokens,
-                                              scanner_url=scanner_url)
+                                              scanner_url=scanner_url,
+                                              loss_alert_usd=loss_alert_usd)
+            if loss_alert_usd is not None:
+                logging.info(f"Instant loss alerts enabled (threshold: ${loss_alert_usd})")
 
             if notifier:
                 notifier.register_bot(bot_info)

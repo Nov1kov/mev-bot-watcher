@@ -25,12 +25,12 @@ def usdc_token():
 
 
 def make_bot(name="ethereum", tokens=None, native_balance=None, balances=None,
-             watched=ADDR, scanner_url=None):
+             watched=ADDR, scanner_url=None, loss_alert_usd=None):
     if tokens is None:
         tokens = [weth_token()]
     return BotInfo(name=name, watched_address=watched, tokens=tokens,
                    native_balance_wei=native_balance, balances=balances or {},
-                   scanner_url=scanner_url)
+                   scanner_url=scanner_url, loss_alert_usd=loss_alert_usd)
 
 
 def event(bot="ethereum", net_by_token=None, gas=0, tx_count=1, fail_count=0,
@@ -318,3 +318,46 @@ class TestTxEvent(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLossAlert(unittest.TestCase):
+    """Мгновенные уведомления об убыточном блоке (loss_alert_usd)"""
+
+    def _notifier(self, threshold, prices):
+        n = TelegramNotifier("token", "chat")
+        n.register_bot(make_bot(tokens=[weth_token(), usdc_token()],
+                                scanner_url="https://etherscan.io/",
+                                loss_alert_usd=threshold))
+        n._fetch_prices = AsyncMock(return_value=prices)
+        n._send = AsyncMock()
+        return n
+
+    def _loss_event(self):
+        # -0.01 WETH × $2500 = -$25 профита, плюс газ 0.001 ETH = $2.5
+        return event(net_by_token={normalize_address(WETH): -10 ** 16},
+                     gas=10 ** 15, tx_count=2, fail_count=1)
+
+    def test_alert_sent_on_loss(self):
+        n = self._notifier(1.0, {"ethereum": 2500.0, "usd-coin": 1.0})
+        ev = self._loss_event()
+        ev.tx_hashes = ["0x" + "ab" * 32]
+        asyncio.run(n.add_event(ev))
+        msg = n._send.call_args_list[0].args[0]
+        self.assertIn("LOSS", msg)
+        self.assertIn("$-27.50", msg)
+        self.assertIn("https://etherscan.io/tx/0x" + "ab" * 32, msg)
+        self.assertIn("Block: `100`", msg)
+
+    def test_no_alert_below_threshold(self):
+        n = self._notifier(100.0, {"ethereum": 2500.0, "usd-coin": 1.0})
+        asyncio.run(n.add_event(self._loss_event()))
+        # отправлен только обычный первый отчёт, но не LOSS-алерт
+        self.assertTrue(all("LOSS" not in c.args[0] for c in n._send.call_args_list))
+
+    def test_disabled_by_default(self):
+        n = TelegramNotifier("token", "chat")
+        n.register_bot(make_bot(tokens=[weth_token()]))  # без loss_alert_usd
+        n._fetch_prices = AsyncMock(return_value={"ethereum": 2500.0})
+        n._send = AsyncMock()
+        asyncio.run(n.add_event(self._loss_event()))
+        self.assertTrue(all("LOSS" not in c.args[0] for c in n._send.call_args_list))

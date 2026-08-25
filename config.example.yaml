@@ -24,6 +24,10 @@ bots:
     # простого текста. Примеры: ethereum — https://etherscan.io/,
     # arbitrum — https://arbiscan.io/
     scanner_url: 'https://etherscan.io/'
+    # loss_alert_usd (опционально) — мгновенный алерт со ссылками на транзакции,
+    # как только P&L блока в этой сети ниже -$loss_alert_usd.
+    # Не указывать — выключено; 0 — на любой убыток; 5 — только убытки больше $5.
+    loss_alert_usd: 1.0
     http_rpc_url: 'https://your-rpc-provider.com/api-key'
     ws_rpc_url: 'wss://your-rpc-provider.com/api-key'
 
