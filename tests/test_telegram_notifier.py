@@ -7,8 +7,8 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from telegram_notifier import TelegramNotifier, TxEvent, BotInfo, format_report
-from tx_analyzer import TokenInfo, normalize_address
+from mev_bot_watcher.telegram_notifier import TelegramNotifier, TxEvent, BotInfo, format_report
+from mev_bot_watcher.tx_analyzer import TokenInfo, normalize_address
 
 WETH = "0x1010101010101010101010101010101010101010"
 USDC = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"

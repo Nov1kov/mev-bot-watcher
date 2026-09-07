@@ -1,6 +1,7 @@
 # MEV Bot Watcher
 
 [![Tests](https://github.com/Nov1kov/mev-bot-watcher/actions/workflows/tests.yml/badge.svg)](https://github.com/Nov1kov/mev-bot-watcher/actions/workflows/tests.yml)
+[![PyPI](https://img.shields.io/pypi/v/mev-bot-watcher)](https://pypi.org/project/mev-bot-watcher/)
 [![Docker](https://img.shields.io/docker/v/nov1kov/mev-watcher?label=docker&sort=semver)](https://hub.docker.com/r/nov1kov/mev-watcher)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
@@ -159,12 +160,19 @@ services:
       - ./config.yaml:/app/config.yaml
 ```
 
-### Локально
+### pip
 
 ```bash
-pip install -r requirements.txt
-python main.py monitor
-python main.py analyze -b ethereum -s 18000000
+pip install mev-bot-watcher
+mev-watcher monitor
+mev-watcher analyze -b ethereum -s 18000000
+```
+
+### Из исходников
+
+```bash
+pip install .
+python -m mev_bot_watcher monitor
 ```
 
 ## Команды
@@ -181,9 +189,9 @@ python main.py analyze -b ethereum -s 18000000
 
 Примеры:
 ```bash
-python main.py monitor -b ethereum
-python main.py analyze -b ethereum -s 18000000
-python main.py analyze -b ethereum -n 18500000
+mev-watcher monitor -b ethereum
+mev-watcher analyze -b ethereum -s 18000000
+mev-watcher analyze -b ethereum -n 18500000
 ```
 
 ## Тесты

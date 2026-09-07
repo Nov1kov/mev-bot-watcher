@@ -6,7 +6,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tx_analyzer import TxAnalyzer, TokenInfo, normalize_address, compute_profit_usd_for
+from mev_bot_watcher.tx_analyzer import TxAnalyzer, TokenInfo, normalize_address, compute_profit_usd_for
 
 TRANSFER = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 DEPOSIT = "0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c"

@@ -5,8 +5,8 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from ws_connector import WsConnectorRaw
-from main import parse_ws_rpc
+from mev_bot_watcher.ws_connector import WsConnectorRaw
+from mev_bot_watcher.main import parse_ws_rpc
 
 
 class TestParseWsRpc(unittest.TestCase):

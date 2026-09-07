@@ -7,5 +7,4 @@ tests
 .git
 .gitignore
 .dockerignore
-README*.md
 .claude

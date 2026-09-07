@@ -1,9 +1,9 @@
 import logging
 from typing import List, Optional
 
-from eth_client import EthClient
-from tx_analyzer import TxAnalyzer, TokenInfo, normalize_address
-from telegram_notifier import TelegramNotifier, TxEvent
+from .eth_client import EthClient
+from .tx_analyzer import TxAnalyzer, TokenInfo, normalize_address
+from .telegram_notifier import TelegramNotifier, TxEvent
 
 
 class TxWatcher:

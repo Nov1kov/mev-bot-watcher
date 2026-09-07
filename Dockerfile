@@ -2,8 +2,9 @@ FROM python:3.13-alpine
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt \
+COPY pyproject.toml README.md LICENSE ./
+COPY mev_bot_watcher ./mev_bot_watcher
+RUN pip install --no-cache-dir . \
  && rm -rf /usr/local/lib/python3*/site-packages/pip \
            /usr/local/lib/python3*/site-packages/pip-*.dist-info \
            /usr/local/lib/python3*/site-packages/setuptools \
@@ -14,7 +15,5 @@ RUN pip install --no-cache-dir -r requirements.txt \
            /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.* \
            /usr/local/lib/python3*/ensurepip
 
-COPY *.py .
-
-ENTRYPOINT ["python", "main.py"]
+ENTRYPOINT ["mev-watcher"]
 CMD ["monitor"]

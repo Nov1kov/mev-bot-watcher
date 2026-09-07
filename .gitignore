@@ -4,4 +4,7 @@ config.yaml
 __pycache__
 *.pyc
 .claude
+.omcdist
+build
+*.egg-info
 .omc

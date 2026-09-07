@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mev-bot-watcher"
+version = "1.0.0"
+description = "CLI tool for analyzing and realtime monitoring of MEV bot profitability on EVM-compatible networks"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "Nov1kov", email = "spellh1@gmail.com" }]
+keywords = ["mev", "ethereum", "evm", "arbitrage", "monitoring", "pnl"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Office/Business :: Financial",
+]
+dependencies = [
+    "PyYAML>=6.0",
+    "aiohttp>=3.14",
+    "websockets>=16.0",
+    "click>=8.1",
+    "croniter>=6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Nov1kov/mev-bot-watcher"
+Issues = "https://github.com/Nov1kov/mev-bot-watcher/issues"
+
+[project.scripts]
+mev-watcher = "mev_bot_watcher.main:cli"
+
+[tool.setuptools]
+packages = ["mev_bot_watcher"]

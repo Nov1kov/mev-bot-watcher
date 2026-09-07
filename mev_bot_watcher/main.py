@@ -4,13 +4,13 @@ import yaml
 import click
 from typing import Dict, List, Optional
 
-from tx_watcher import TxWatcher
-from eth_client import EthClient
-from coingecko_client import CoinGeckoClient
-from log_progress import setup_logging
-from telegram_notifier import BotInfo
-from tx_analyzer import TxAnalyzer, TokenInfo
-from ws_connector import WsConnectorRaw
+from .tx_watcher import TxWatcher
+from .eth_client import EthClient
+from .coingecko_client import CoinGeckoClient
+from .log_progress import setup_logging
+from .telegram_notifier import BotInfo
+from .tx_analyzer import TxAnalyzer, TokenInfo
+from .ws_connector import WsConnectorRaw
 
 
 def load_config(config_path: str) -> Dict:

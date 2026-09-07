@@ -9,8 +9,8 @@ from urllib.parse import urljoin
 import aiohttp
 from croniter import croniter
 
-from coingecko_client import CoinGeckoClient
-from tx_analyzer import TokenInfo, normalize_address, compute_profit_usd_for
+from .coingecko_client import CoinGeckoClient
+from .tx_analyzer import TokenInfo, normalize_address, compute_profit_usd_for
 
 
 # Цены кешируются на минуту: при включённых мгновенных алертах запрос цен

@@ -2,9 +2,9 @@ import logging
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Union, List
 
-from log_progress import print_progress
-from eth_client import EthClient
-from coingecko_client import CoinGeckoClient
+from .log_progress import print_progress
+from .eth_client import EthClient
+from .coingecko_client import CoinGeckoClient
 
 ERC20_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 WETH_DEPOSIT_TOPIC = "0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c"
