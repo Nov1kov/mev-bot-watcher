@@ -87,7 +87,7 @@ bots:
 
 • ethereum (WETH — $3,210.50)
   0xYOUR_BOT_ADDRESS
-  💰 Balance:
+  💰 Balance: $5,815.75
   ETH: 1.5000 ($4,815.75)
   USDC: 1000.0000 ($1,000.00)
 
@@ -104,7 +104,7 @@ bots:
 0x1234...5678
 ├ Successful txs: 3/4
 └ Total: $+2.50
-💰 Balance:
+💰 Balance: $5,811.04
   ETH: 1.4980 ($4,809.32)
   USDC: 1001.7200 ($1,001.72)
 ```
@@ -127,7 +127,6 @@ bots:
 🚨 LOSS — ETHEREUM $-10.12
 0x1234...5678
 ├ Block: 21500123
-├ Txs: 2 (failed: 1)
 ├ WETH: -0.004200 ($-10.50)
 ├ USDC: +1.500000 ($+1.50)
 └ Gas: 0.001500 ETH ($3.75)
