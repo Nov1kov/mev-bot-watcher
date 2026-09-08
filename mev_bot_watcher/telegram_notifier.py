@@ -140,14 +140,18 @@ def _usd_suffix(amount: float, price: Optional[float], signed: bool = False) -> 
     return f" (${value:+,.2f})" if signed else f" (${value:,.2f})"
 
 
-def _format_balance_lines(info: BotInfo, prices: Optional[Dict[str, float]]) -> List[str]:
-    """Строки баланса: нативный токен + каждый отслеживаемый токен."""
+def _format_balances(info: BotInfo,
+                     prices: Optional[Dict[str, float]]) -> tuple:
+    """Строки баланса и суммарная стоимость в USD (None если цен нет)."""
     prices = prices or {}
     lines: List[str] = []
+    total_usd: Optional[float] = None
     if info.native_balance_wei is not None:
         native_amount = info.native_balance_wei / 1e18
         if round(native_amount, 4) != 0:
             price = prices.get(info.native_coingecko_id) if info.native_coingecko_id else None
+            if price is not None:
+                total_usd = (total_usd or 0.0) + native_amount * price
             lines.append(f"  `{info.native_symbol}: {native_amount:.4f}"
                          f"{_usd_suffix(native_amount, price)}`")
     for token in info.tokens:
@@ -158,8 +162,15 @@ def _format_balance_lines(info: BotInfo, prices: Optional[Dict[str, float]]) -> 
         if round(amount, 4) == 0:
             continue
         price = prices.get(token.coingecko_id) if token.coingecko_id else None
+        if price is not None:
+            total_usd = (total_usd or 0.0) + amount * price
         lines.append(f"  `{token.symbol}: {amount:.4f}{_usd_suffix(amount, price)}`")
-    return lines
+    return lines, total_usd
+
+
+def _balance_header(total_usd: Optional[float], indent: str = "") -> str:
+    total = f" `${total_usd:,.2f}`" if total_usd is not None else ""
+    return f"{indent}\U0001f4b0 Balance:{total}"
 
 
 class TelegramNotifier:
@@ -283,9 +294,9 @@ class TelegramNotifier:
             price_str = f" — ${native_price:,.2f}" if native_price else ""
             lines.append(f"• *{name}* ({symbol}{price_str})")
             lines.append(f"  {info.address_link(info.watched_address)}")
-            balance_lines = _format_balance_lines(info, prices)
+            balance_lines, total_usd = _format_balances(info, prices)
             if balance_lines:
-                lines.append("  \U0001f4b0 Balance:")
+                lines.append(_balance_header(total_usd, "  "))
                 lines.extend(balance_lines)
         lines.append("")
         lines.append(f"⏰ Schedule: `{self.notify_schedule}`")
@@ -358,9 +369,9 @@ def format_report(events: List[TxEvent],
             lines.append("└ Total: `n/a`")
 
         if info is not None:
-            balance_lines = _format_balance_lines(info, prices)
+            balance_lines, total_usd = _format_balances(info, prices)
             if balance_lines:
-                lines.append("\U0001f4b0 Balance:")
+                lines.append(_balance_header(total_usd))
                 lines.extend(balance_lines)
         lines.append("")
 
@@ -376,7 +387,6 @@ def format_loss_alert(event: TxEvent, info: BotInfo, profit_usd: float,
         f"🚨 *LOSS* — *{info.name.upper()}* `${profit_usd:+,.2f}`",
         info.address_link(f"{addr[:6]}...{addr[-4:]}"),
         f"├ Block: `{event.block_number}`",
-        f"├ Txs: {event.tx_count} (failed: {event.fail_count})",
     ]
     for token in info.tokens:
         net = event.net_by_token.get(token.address, 0)
