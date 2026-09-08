@@ -8,7 +8,7 @@ from .tx_watcher import TxWatcher
 from .eth_client import EthClient
 from .coingecko_client import CoinGeckoClient
 from .log_progress import setup_logging
-from .telegram_notifier import BotInfo
+from .telegram_notifier import BotInfo, TelegramNotifier
 from .tx_analyzer import TxAnalyzer, TokenInfo
 from .ws_connector import WsConnectorRaw
 
@@ -150,7 +150,6 @@ def monitor(config: str, bot_name: Optional[str] = None):
         # Настройка Telegram уведомлений
         notifier = None
         if telegram_config and telegram_config.get('bot_token'):
-            from telegram_notifier import TelegramNotifier
             schedule = telegram_config.get('notify_schedule', '0 * * * *')
             notifier = TelegramNotifier(
                 bot_token=telegram_config['bot_token'],

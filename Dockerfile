@@ -1,5 +1,8 @@
 FROM python:3.13-alpine
 
+# patch base-image CVEs (alpine ships fixes faster than the python image is rebuilt)
+RUN apk upgrade --no-cache
+
 WORKDIR /app
 
 COPY pyproject.toml README.md LICENSE ./
