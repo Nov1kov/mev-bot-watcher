@@ -9,7 +9,7 @@ from .eth_client import EthClient
 from .coingecko_client import CoinGeckoClient
 from .log_progress import setup_logging
 from .telegram_notifier import BotInfo, TelegramNotifier
-from .tx_analyzer import TxAnalyzer, TokenInfo
+from .tx_analyzer import TxAnalyzer, TokenInfo, native_token_info
 from .ws_connector import WsConnectorRaw
 
 
@@ -40,8 +40,9 @@ def get_token_addresses(bot_config: Dict) -> tuple:
 
 async def build_tokens(eth_client: EthClient, cg_client: CoinGeckoClient,
                        wrapped: str, base: List[str]) -> List[TokenInfo]:
-    """Собирает список TokenInfo: wrapped (is_wrapped=True) + base_tokens."""
+    """Собирает список TokenInfo: wrapped (is_wrapped=True) + native + base_tokens."""
     tokens = [await TokenInfo.from_rpc(eth_client, cg_client, wrapped, is_wrapped=True)]
+    tokens.append(native_token_info(tokens[0]))
     for addr in base:
         tokens.append(await TokenInfo.from_rpc(eth_client, cg_client, addr, is_wrapped=False))
     return tokens

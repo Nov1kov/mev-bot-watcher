@@ -10,6 +10,10 @@ ERC20_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a
 WETH_DEPOSIT_TOPIC = "0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c"
 WETH_WITHDRAWAL_TOPIC = "0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65"
 
+# Псевдо-адрес нативной монеты (BNB/ETH): она не эмитит логов, её движения
+# берутся из callTracer-трейса транзакции.
+NATIVE_ADDRESS = "0x" + "0" * 40
+
 
 def parse_transfer_event(topics: List[str], data: str) -> tuple:
     """Разбор ERC20 Transfer события из логов"""
@@ -40,6 +44,25 @@ def native_symbol_of(symbol: str) -> str:
     if len(symbol) > 1 and symbol[0].upper() == "W":
         return symbol[1:]
     return symbol
+
+
+def native_delta_from_trace(call: Dict, watched: str) -> int:
+    """Изменение нативного баланса watched по callTracer-трейсу (без газа).
+
+    Реверченный вызов не переводит value — пропускаем его вместе с поддеревом.
+    """
+    if call.get('error'):
+        return 0
+    delta = 0
+    value = int(call.get('value') or '0x0', 16)
+    if value:
+        if normalize_address(call['from']) == watched:
+            delta -= value
+        if call.get('to') and normalize_address(call['to']) == watched:
+            delta += value
+    for sub in call.get('calls') or []:
+        delta += native_delta_from_trace(sub, watched)
+    return delta
 
 
 def compute_profit_usd_for(tokens: List["TokenInfo"], native_coingecko_id: Optional[str],
@@ -124,6 +147,12 @@ class TokenInfo:
                    coingecko_id=coingecko_id, is_wrapped=is_wrapped)
 
 
+def native_token_info(wrapped: TokenInfo) -> TokenInfo:
+    """Псевдо-токен нативной монеты по обёртке: WBNB -> BNB, цена та же 1:1."""
+    return TokenInfo(address=NATIVE_ADDRESS, symbol=wrapped.native_symbol,
+                     decimals=18, coingecko_id=wrapped.coingecko_id)
+
+
 class TxAnalyzer:
     """Класс для анализа транзакций по набору отслеживаемых токенов"""
 
@@ -139,12 +168,15 @@ class TxAnalyzer:
         self.native_coingecko_id = self.wrapped.coingecko_id if self.wrapped else None
         self.native_symbol = self.wrapped.native_symbol if self.wrapped else "ETH"
 
-    def parse_receipt(self, receipt: Dict, tx_hash: str) -> Dict:
+    def parse_receipt(self, receipt: Dict, tx_hash: str,
+                      trace: Optional[Dict] = None) -> Dict:
         """Разбор receipt: gas, статус и net-изменение баланса по каждому токену.
 
         Учитываются события на адресах отслеживаемых токенов: ERC20 Transfer
         (в обе стороны) для всех токенов, а также WETH Deposit(dst, wad) и
         WETH Withdrawal(src, wad) — только для wrapped-токена (обёртки нативного).
+        trace — callTracer-трейс: нативные переводы логов не оставляют, поэтому
+        профит в BNB/ETH считается только по нему.
         """
         net_by_token: Dict[str, int] = {t.address: 0 for t in self.tokens}
         gas_fee_wei = int(receipt['gasUsed'], 16) * int(receipt['effectiveGasPrice'], 16)
@@ -171,6 +203,9 @@ class TxAnalyzer:
                 if src == self.watched_address:
                     net_by_token[addr] -= amount
 
+        if trace is not None and NATIVE_ADDRESS in net_by_token:
+            net_by_token[NATIVE_ADDRESS] += native_delta_from_trace(trace, self.watched_address)
+
         return {
             "status": status,
             "tx_hash": tx_hash,
@@ -187,11 +222,22 @@ class TxAnalyzer:
             tx_to = normalize_address(tx['to']) if tx['to'] else None
             if tx_from == self.watched_address or (tx_to and tx_to == self.watched_address):
                 receipt = await self.eth_client.get_transaction_receipt(tx['hash'])
-                transactions_details.append(self.parse_receipt(receipt, tx['hash']))
+                trace = await self._get_trace(tx['hash'])
+                transactions_details.append(self.parse_receipt(receipt, tx['hash'], trace))
 
         if transactions_details:
             return self.create_block_summary(block, transactions_details)
         return None
+
+    async def _get_trace(self, tx_hash: str) -> Optional[Dict]:
+        """callTracer-трейс, если отслеживается нативная монета. None при ошибке RPC."""
+        if NATIVE_ADDRESS not in self.tokens_by_address:
+            return None
+        try:
+            return await self.eth_client.trace_transaction(tx_hash)
+        except Exception:
+            logging.exception(f"trace failed for {tx_hash}, native profit not counted")
+            return None
 
     @staticmethod
     def prettify(amount_raw: Union[int, float], decimals: int) -> str:
@@ -257,6 +303,10 @@ class TxAnalyzer:
             to_block = min(from_block + chunk_size - 1, end_block)
 
             for token in self.tokens:
+                # ponytail: нативная монета не эмитит логов — блоки с чисто
+                # нативным профитом здесь не находятся; нужен трейс блока.
+                if token.address == NATIVE_ADDRESS:
+                    continue
                 # Transfer.from, Deposit.dst, Withdrawal.src — индексированы в topics[1]
                 topic1_events = [ERC20_TRANSFER_TOPIC]
                 if token.is_wrapped:

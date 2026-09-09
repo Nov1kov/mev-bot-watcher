@@ -10,7 +10,8 @@ import aiohttp
 from croniter import croniter
 
 from .coingecko_client import CoinGeckoClient
-from .tx_analyzer import TokenInfo, normalize_address, compute_profit_usd_for
+from .tx_analyzer import (NATIVE_ADDRESS, TokenInfo, normalize_address,
+                          compute_profit_usd_for)
 
 
 # Цены кешируются на минуту: при включённых мгновенных алертах запрос цен
@@ -125,6 +126,8 @@ class BotInfo:
         except Exception:
             logging.exception(f"[{self.name}] failed to fetch native balance")
         for token in self.tokens:
+            if token.address == NATIVE_ADDRESS:  # уже в native_balance_wei
+                continue
             try:
                 self.balances[token.address] = await self.eth_client.get_erc20_balance(
                     token.address, self.watched_address)

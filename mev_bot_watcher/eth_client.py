@@ -83,6 +83,11 @@ class EthClient:
         transaction = await self.eth_call('eth_getTransactionByHash', [tx_hash])
         return transaction
     
+    async def trace_transaction(self, tx_hash: str) -> Dict:
+        """callTracer-трейс транзакции — единственный источник нативных переводов"""
+        return await self.eth_call('debug_traceTransaction',
+                                   [tx_hash, {'tracer': 'callTracer'}])
+
     async def get_logs(self, from_block: int, to_block: int, address: str, topics: list) -> list:
         """Получение логов по фильтру"""
         params = {
