@@ -34,6 +34,8 @@ class TxEvent:
     net_by_token: Dict[str, int]
     gas_fee_wei: int
     tx_hashes: List[str] = field(default_factory=list)
+    # трейс не получен -> нативный доход неизвестен, профит в USD не считаем
+    native_unknown: bool = False
     timestamp: float = field(default_factory=time.time)
 
 
@@ -215,7 +217,8 @@ class TelegramNotifier:
             return
         prices = await self._fetch_prices([event.bot_name])
         profit_usd = compute_profit_usd_for(info.tokens, info.native_coingecko_id,
-                                            event.net_by_token, event.gas_fee_wei, prices)
+                                            event.net_by_token, event.gas_fee_wei, prices,
+                                            event.native_unknown)
         if profit_usd is None or profit_usd >= -info.loss_alert_usd:
             return
         await self._send(format_loss_alert(event, info, profit_usd, prices))
@@ -346,7 +349,8 @@ def format_report(events: List[TxEvent],
         profit_usd = None
         if info is not None:
             profit_usd = compute_profit_usd_for(info.tokens, info.native_coingecko_id,
-                                                net_by_token, total_gas_wei, prices)
+                                                net_by_token, total_gas_wei, prices,
+                                                any(e.native_unknown for e in bot_events))
 
         if profit_usd is None:
             emoji = "➖"

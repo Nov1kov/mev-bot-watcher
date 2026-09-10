@@ -19,7 +19,7 @@ from mev_bot_watcher.tx_analyzer import TxAnalyzer, TokenInfo, native_token_info
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fixtures')
 
-EOA = '0xef517ed98a7965f4305577fff772cc49c5a81fbe'
+EOA = '0x0000000000000000000000000000000000000e0a'
 BOT_CONTRACT = '0x0000000000000000000000000000000000000b07'
 WBNB = '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c'
 BNB_USD = 729.48  # цена BNB на момент блока

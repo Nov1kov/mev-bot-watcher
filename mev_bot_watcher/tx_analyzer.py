@@ -67,13 +67,16 @@ def native_delta_from_trace(call: Dict, watched: str) -> int:
 
 def compute_profit_usd_for(tokens: List["TokenInfo"], native_coingecko_id: Optional[str],
                            net_by_token: Dict[str, int], gas_wei: int,
-                           prices_by_id: Dict[str, float]) -> Optional[float]:
+                           prices_by_id: Dict[str, float],
+                           native_unknown: bool = False) -> Optional[float]:
     """Свести мультитокенный профит и газ в USD.
 
     profit = Σ(net_token / 10^decimals × price) − gas_eth × native_price.
-    Возвращает None, если нет ни одной известной цены (USD неопределён).
+    Возвращает None, если нет ни одной известной цены (USD неопределён) либо
+    native_unknown — трейс не получен, нативный доход неизвестен: без него
+    остался бы один газ, и профит выглядел бы убытком.
     """
-    if not prices_by_id:
+    if not prices_by_id or native_unknown:
         return None
     profit = 0.0
     used_any = False
@@ -167,6 +170,8 @@ class TxAnalyzer:
                             tokens[0] if tokens else None)
         self.native_coingecko_id = self.wrapped.coingecko_id if self.wrapped else None
         self.native_symbol = self.wrapped.native_symbol if self.wrapped else "ETH"
+        # хотя бы у одной транзакции не удалось получить трейс -> итог в USD неизвестен
+        self.native_unknown = False
 
     def parse_receipt(self, receipt: Dict, tx_hash: str,
                       trace: Optional[Dict] = None) -> Dict:
@@ -203,6 +208,7 @@ class TxAnalyzer:
                 if src == self.watched_address:
                     net_by_token[addr] -= amount
 
+        native_unknown = NATIVE_ADDRESS in net_by_token and trace is None
         if trace is not None and NATIVE_ADDRESS in net_by_token:
             net_by_token[NATIVE_ADDRESS] += native_delta_from_trace(trace, self.watched_address)
 
@@ -211,6 +217,7 @@ class TxAnalyzer:
             "tx_hash": tx_hash,
             "net_by_token": net_by_token,
             "gas_fee_wei": gas_fee_wei,
+            "native_unknown": native_unknown,
         }
 
     async def analyze_block(self, block: Dict) -> Optional[Dict]:
@@ -236,7 +243,8 @@ class TxAnalyzer:
         try:
             return await self.eth_client.trace_transaction(tx_hash)
         except Exception:
-            logging.exception(f"trace failed for {tx_hash}, native profit not counted")
+            self.native_unknown = True
+            logging.exception(f"trace failed for {tx_hash}, native profit unknown")
             return None
 
     @staticmethod
@@ -267,13 +275,16 @@ class TxAnalyzer:
             "total_gas_wei": total_gas_wei,
             "tx_count": len(transactions_details),
             "fail_count": sum(1 for tx in transactions_details if tx['status'] == 0),
+            "native_unknown": any(tx['native_unknown'] for tx in transactions_details),
         }
 
     def compute_profit_usd(self, net_by_token: Dict[str, int], gas_wei: int,
-                           prices_by_id: Dict[str, float]) -> Optional[float]:
+                           prices_by_id: Dict[str, float],
+                           native_unknown: bool = False) -> Optional[float]:
         """Свести мультитокенный профит и газ в USD (см. compute_profit_usd_for)."""
         return compute_profit_usd_for(self.tokens, self.native_coingecko_id,
-                                      net_by_token, gas_wei, prices_by_id)
+                                      net_by_token, gas_wei, prices_by_id,
+                                      native_unknown)
 
     async def _fetch_prices(self) -> Dict[str, float]:
         """USD-цены для всех токенов + нативного, одним запросом к CoinGecko."""
@@ -348,11 +359,13 @@ class TxAnalyzer:
                 logging.info(f"Total {token.symbol}: {self.prettify(net, token.decimals)}")
         logging.info(f"Total gas: {self.prettify_weth(total_gas_wei)} {self.native_symbol}")
 
-        profit_usd = self.compute_profit_usd(totals, total_gas_wei, prices)
+        profit_usd = self.compute_profit_usd(totals, total_gas_wei, prices,
+                                             self.native_unknown)
         if profit_usd is not None:
             logging.info(f"Total profit: ${profit_usd:+,.2f}")
         else:
-            logging.warning("Total profit in USD unavailable (no prices)")
+            logging.warning("Total profit in USD unavailable "
+                            "(no prices or native income unknown)")
 
     async def analyze_from_block(self, start_block_number: int):
         """Функция для анализа блоков начиная с указанного"""

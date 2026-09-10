@@ -47,4 +47,5 @@ class TxWatcher:
                 net_by_token=block_summary['net_by_token'],
                 gas_fee_wei=block_summary['total_gas_wei'],
                 tx_hashes=block_summary['tx_hashes'],
+                native_unknown=block_summary['native_unknown'],
             ))
