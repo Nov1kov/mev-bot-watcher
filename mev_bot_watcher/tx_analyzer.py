@@ -46,22 +46,27 @@ def native_symbol_of(symbol: str) -> str:
     return symbol
 
 
-def native_delta_from_trace(call: Dict, watched: str) -> int:
-    """Изменение нативного баланса watched по callTracer-трейсу (без газа).
+def native_delta_from_trace(call: Dict, us: set) -> int:
+    """Изменение нативного баланса адресов us по callTracer-трейсу (без газа).
 
+    Переводы внутри us (контракт -> EOA) — не доход и не убыток.
     Реверченный вызов не переводит value — пропускаем его вместе с поддеревом.
+    DELEGATECALL/STATICCALL ничего не переводят: value у DELEGATECALL — это
+    унаследованный msg.value, учёт его дал бы двойное списание.
     """
     if call.get('error'):
         return 0
     delta = 0
     value = int(call.get('value') or '0x0', 16)
-    if value:
-        if normalize_address(call['from']) == watched:
+    if value and call.get('type') not in ('DELEGATECALL', 'STATICCALL'):
+        from_us = normalize_address(call['from']) in us
+        to_us = bool(call.get('to')) and normalize_address(call['to']) in us
+        if from_us and not to_us:
             delta -= value
-        if call.get('to') and normalize_address(call['to']) == watched:
+        if to_us and not from_us:
             delta += value
     for sub in call.get('calls') or []:
-        delta += native_delta_from_trace(sub, watched)
+        delta += native_delta_from_trace(sub, us)
     return delta
 
 
@@ -160,11 +165,16 @@ class TxAnalyzer:
     """Класс для анализа транзакций по набору отслеживаемых токенов"""
 
     def __init__(self, eth_client: EthClient, tokens: List[TokenInfo], watched_address: str,
-                 cg_client: Optional[CoinGeckoClient] = None):
+                 cg_client: Optional[CoinGeckoClient] = None,
+                 eoa_addresses: Optional[List[str]] = None):
         self.eth_client = eth_client
         self.tokens = tokens
         self.tokens_by_address = {t.address: t for t in tokens}
         self.watched_address = normalize_address(watched_address)
+        # EOA бота: переводы контракт <-> EOA внутренние. None — своим
+        # считается отправитель любой транзакции.
+        self.eoa_addresses = ({normalize_address(a) for a in eoa_addresses}
+                              if eoa_addresses else None)
         self.cg_client = cg_client
         self.wrapped = next((t for t in tokens if t.is_wrapped),
                             tokens[0] if tokens else None)
@@ -182,7 +192,14 @@ class TxAnalyzer:
         WETH Withdrawal(src, wad) — только для wrapped-токена (обёртки нативного).
         trace — callTracer-трейс: нативные переводы логов не оставляют, поэтому
         профит в BNB/ETH считается только по нему.
+        EOA бота (eoa_addresses, а без них — отправитель транзакции) считаются
+        своими: вывод средств контракта на них — внутренний перевод, а не убыток.
         """
+        us = {self.watched_address}
+        if self.eoa_addresses is not None:
+            us |= self.eoa_addresses
+        elif receipt.get('from'):
+            us.add(normalize_address(receipt['from']))
         net_by_token: Dict[str, int] = {t.address: 0 for t in self.tokens}
         gas_fee_wei = int(receipt['gasUsed'], 16) * int(receipt['effectiveGasPrice'], 16)
         status = int(receipt['status'], 16)
@@ -195,9 +212,9 @@ class TxAnalyzer:
             topic0 = log['topics'][0].lower()
             if topic0 == ERC20_TRANSFER_TOPIC:
                 from_address, to_address, amount = parse_transfer_event(log['topics'], log['data'])
-                if from_address == self.watched_address:
+                if from_address in us and to_address not in us:
                     net_by_token[addr] -= amount
-                if to_address == self.watched_address:
+                if to_address in us and from_address not in us:
                     net_by_token[addr] += amount
             elif token.is_wrapped and topic0 == WETH_DEPOSIT_TOPIC:
                 dst, amount = parse_single_address_event(log['topics'], log['data'])
@@ -210,7 +227,7 @@ class TxAnalyzer:
 
         native_unknown = NATIVE_ADDRESS in net_by_token and trace is None
         if trace is not None and NATIVE_ADDRESS in net_by_token:
-            net_by_token[NATIVE_ADDRESS] += native_delta_from_trace(trace, self.watched_address)
+            net_by_token[NATIVE_ADDRESS] += native_delta_from_trace(trace, us)
 
         return {
             "status": status,

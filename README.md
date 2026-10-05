@@ -18,6 +18,7 @@ Scans historical blocks or subscribes to new ones via WebSocket, finds transacti
 - **Realtime monitoring** — subscribe to new blocks via WebSocket
 - **Multichain** — multiple networks via config (Ethereum, Arbitrum, etc.)
 - **Telegram notifications** — aggregated reports with configurable interval, USD profit and per-token balances; bot addresses can link to a block explorer via `scanner_url`
+- **Contract → EOA payouts** — moving funds from the bot contract to its EOA (`eoa_addresses`, or any tx sender by default) is an internal transfer, not a loss: only gas is counted
 - **Instant loss alerts** — optional per-network `loss_alert_usd`: as soon as a block turns out unprofitable, a separate message is sent with links to the offending transactions
 
 ## Configuration
@@ -41,6 +42,11 @@ bots:
       - '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'   # USDC
       - '0xdAC17F958D2ee523a2206206994597C13D831ec7'   # USDT
     watched_address: '0xYOUR_BOT_ADDRESS'
+    # eoa_addresses (optional) — the bot's EOAs. Transfers between the contract
+    # and them (e.g. profit payout to the EOA) are not counted as income/loss.
+    # Omit to treat the sender of any bot transaction as the bot's own EOA.
+    eoa_addresses:
+      - '0xYOUR_BOT_EOA'
     # scanner_url (optional) — base URL of the network block explorer. Used to
     # turn the bot address in Telegram notifications into a clickable link.
     # Examples: ethereum — https://etherscan.io/, arbitrum — https://arbiscan.io/
@@ -108,6 +114,16 @@ send time:
   ETH: 1.4980 ($4,809.32)
   USDC: 1001.7200 ($1,001.72)
 ```
+
+### Bot EOAs (`eoa_addresses`)
+
+When `watched_address` is a contract, the bot often pays out profit (native
+ETH/BNB or tokens) to its EOA, or you withdraw funds from it manually. Such a
+transfer is internal: it costs only gas and is not shown as a loss.
+
+`eoa_addresses` is an optional list of the bot's EOAs. Without it, the sender
+of each watched transaction is considered the bot's own; with it, only the
+listed addresses are, and a payout to any other address counts as an outflow.
 
 ### Instant loss alerts
 

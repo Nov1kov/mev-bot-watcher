@@ -8,13 +8,15 @@ from .telegram_notifier import TelegramNotifier, TxEvent
 
 class TxWatcher:
     def __init__(self, eth_client: EthClient, tokens: List[TokenInfo], watched_address: str,
-                 bot_name: str = "", notifier: Optional[TelegramNotifier] = None):
+                 bot_name: str = "", notifier: Optional[TelegramNotifier] = None,
+                 eoa_addresses: Optional[List[str]] = None):
         self.eth_client = eth_client
         self.tokens = tokens
         self.watched_address = normalize_address(watched_address)
         self.bot_name = bot_name
         self.notifier = notifier
-        self.analyzer = TxAnalyzer(eth_client, tokens, watched_address)
+        self.analyzer = TxAnalyzer(eth_client, tokens, watched_address,
+                                   eoa_addresses=eoa_addresses)
 
     async def subscribe(self, ws_connector):
         await ws_connector.subscribe(self.handle_event, subscription_type="newHeads")

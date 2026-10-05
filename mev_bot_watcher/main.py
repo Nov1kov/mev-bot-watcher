@@ -111,7 +111,8 @@ def analyze(config: str, bot_name: str, start_block: Optional[int], block: Optio
             for t in tokens:
                 logging.info(f"Token {t.symbol} ({t.address}) decimals={t.decimals} "
                              f"coingecko_id={t.coingecko_id}")
-            analyzer = TxAnalyzer(eth_client, tokens, watched_address, cg_client=cg_client)
+            analyzer = TxAnalyzer(eth_client, tokens, watched_address, cg_client=cg_client,
+                                  eoa_addresses=bot_config.get('eoa_addresses'))
             if start_block is not None:
                 await analyzer.analyze_from_block(start_block)
             else:
@@ -194,7 +195,8 @@ def monitor(config: str, bot_name: Optional[str] = None):
                 notifier.register_bot(bot_info)
 
             watcher = TxWatcher(eth_client, tokens, watched_address,
-                                bot_name=name, notifier=notifier)
+                                bot_name=name, notifier=notifier,
+                                eoa_addresses=bot_cfg.get('eoa_addresses'))
             await watcher.subscribe(ws)
             tasks.append(ws.run())
 
